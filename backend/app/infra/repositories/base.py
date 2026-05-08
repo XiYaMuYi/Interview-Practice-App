@@ -83,6 +83,23 @@ class BaseRepository(Generic[ModelT]):
         await self.session.flush()
         return True
 
+    async def soft_delete(self, id: UUID) -> bool:
+        """Soft-delete by setting deleted_at timestamp.
+
+        Only works for models that have a deleted_at column.
+        Returns False if the model doesn't support soft-delete or object not found.
+        """
+        from datetime import datetime
+
+        obj = await self.get_by_id(id)
+        if obj is None:
+            return False
+        if not hasattr(obj, "deleted_at"):
+            return False
+        obj.deleted_at = datetime.utcnow()
+        await self.session.flush()
+        return True
+
 
 # ── Domain-specific repositories ────────────────────────────────────
 

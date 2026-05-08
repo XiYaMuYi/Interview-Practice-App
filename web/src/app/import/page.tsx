@@ -1,12 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import axios from "axios";
+
+interface ImportResult {
+  status: string;
+  questions_extracted: number;
+  knowledge_nodes: number;
+  question_ids: string[];
+}
 
 export default function ImportPage() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleImport = async () => {
@@ -15,9 +23,12 @@ export default function ImportPage() {
     setError(null);
     setResult(null);
     try {
-      const res = await axios.post("/api/v1/import/text", { text });
+      const formData = new FormData();
+      formData.append("text", text);
+      const res = await axios.post("/api/v1/import/text", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
       setResult(res.data);
-      setText("");
     } catch {
       setError("导入失败，请检查文本格式或后端服务状态");
     } finally {
@@ -43,7 +54,7 @@ export default function ImportPage() {
           id="import-text"
           rows={12}
           className="w-full border border-gray-300 rounded-lg p-3 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y"
-          placeholder={`在此粘贴题目文本...\n\n示例格式：\n题目：什么是闭包？\n难度：medium\n分类：JavaScript\n\n题目：请解释 React 的虚拟 DOM\n难度：medium\n分类：前端框架`}
+          placeholder={`在此粘贴题目文本...\n\n示例格式：\n题目：什么是闭包？\n难度：3\n分类：Frontend\n\n题目：请解释 React 的虚拟 DOM\n难度：3\n分类：Frontend`}
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -72,8 +83,17 @@ export default function ImportPage() {
       )}
 
       {result && (
-        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
-          导入成功！新增 {result.imported} 道题目，跳过 {result.skipped} 道。
+        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <p className="text-green-700 font-medium">导入成功！</p>
+          <p className="text-green-600 text-sm mt-1">
+            提取 {result.questions_extracted} 道题目，{result.knowledge_nodes} 个知识节点。
+          </p>
+          <Link
+            href="/questions"
+            className="inline-block mt-3 text-sm text-blue-600 hover:underline"
+          >
+            查看题目列表 &rarr;
+          </Link>
         </div>
       )}
     </div>

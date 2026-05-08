@@ -47,7 +47,24 @@ class BaseRepository(Generic[ModelT]):
             for key, value in filters.items():
                 stmt = stmt.where(getattr(self.model, key) == value)
         result = await self.session.exec(stmt)
-        return result.all()
+        rows = result.all()
+        # SQLModel returns either model instances directly or BaseRow wrappers
+        out: list[ModelT] = []
+        for row in rows:
+            if isinstance(row, self.model):
+                out.append(row)
+            elif hasattr(row, "_mapping"):
+                mapping = dict(row._mapping)
+                # Single-column row: the value might already be the model
+                if len(mapping) == 1:
+                    val = next(iter(mapping.values()))
+                    if isinstance(val, self.model):
+                        out.append(val)
+                        continue
+                out.append(self.model.model_validate(mapping))
+            else:
+                out.append(row)
+        return out
 
     async def count(self, filters: dict[str, Any] | None = None) -> int:
         from sqlalchemy import func
@@ -62,7 +79,8 @@ class BaseRepository(Generic[ModelT]):
     async def create(self, obj: ModelT) -> ModelT:
         self.session.add(obj)
         await self.session.flush()
-        await self.session.refresh(obj)
+        # UUIDs are client-side generated (default_factory=uuid4),
+        # so obj.id is already set after flush — no need to re-fetch.
         return obj
 
     async def update(self, id: UUID, updates: dict[str, Any]) -> ModelT | None:
@@ -72,7 +90,6 @@ class BaseRepository(Generic[ModelT]):
         for key, value in updates.items():
             setattr(obj, key, value)
         await self.session.flush()
-        await self.session.refresh(obj)
         return obj
 
     async def delete(self, id: UUID) -> bool:
@@ -137,7 +154,22 @@ class QuestionRepository(BaseRepository["Question"]):
             stmt = stmt.where(self.model.difficulty_level == difficulty_level)
         stmt = stmt.offset(offset).limit(limit).order_by(self.model.created_at.desc())
         result = await self.session.exec(stmt)
-        return result.all()
+        rows = result.all()
+        out: list[Question] = []
+        for row in rows:
+            if isinstance(row, self.model):
+                out.append(row)
+            elif hasattr(row, "_mapping"):
+                mapping = dict(row._mapping)
+                if len(mapping) == 1:
+                    val = next(iter(mapping.values()))
+                    if isinstance(val, self.model):
+                        out.append(val)
+                        continue
+                out.append(self.model.model_validate(mapping))
+            else:
+                out.append(row)
+        return out
 
 
 class TagRepository(BaseRepository["Tag"]):

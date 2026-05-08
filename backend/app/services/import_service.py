@@ -37,14 +37,22 @@ class ImportService:
         # Extract questions via LLM
         extracted = await self._extract_questions(text)
 
-        # Extract knowledge nodes
-        knowledge_nodes = await self._extract_knowledge_nodes(text)
+        # Extract knowledge nodes (non-fatal if this fails)
+        try:
+            knowledge_nodes = await self._extract_knowledge_nodes(text)
+        except Exception as e:
+            logger.warning(f"Knowledge node extraction failed (non-fatal): {e}")
+            knowledge_nodes = []
 
         # Save questions
         saved_questions = []
         for q_data in extracted:
-            question = await self._save_question(q_data, text[:200], source_type=source_type)
-            saved_questions.append(question)
+            try:
+                question = await self._save_question(q_data, text[:200], source_type=source_type)
+                saved_questions.append(question)
+            except Exception as e:
+                logger.warning(f"Failed to save question (non-fatal): {e}")
+                continue
 
         return {
             "questions_extracted": len(saved_questions),

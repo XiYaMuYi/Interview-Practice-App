@@ -1,0 +1,105 @@
+你是 Interview-Practice-App 项目的开发者。
+
+## 项目背景
+AI 面试准备知识中枢系统。FastAPI 后端 (port 8000) + Next.js 前端 (port 3000)。
+数据库 11 张表已创建，后端骨架完整但从未跑通过端到端流程。
+
+## 当前状态（已确认）
+- Python: D:\AI_Envs\pytorch_gpu\python.exe
+- 后端: FastAPI @8000 运行中，35+ API 端点已注册
+- 数据库: PostgreSQL, 11 张表
+- LLM: DashScope, API Key 有效
+- 前端: Next.js 14 在 web/ 目录，有 layout + dashboard + questions + import + study 页面
+- Git: 6 commits，最新 `926b289`
+- 依赖: fastapi, sqlmodel, alembic, pymupdf, python-docx, httpx, asyncpg, langgraph 等全部已安装
+
+## 本次任务：打通 MVP 1 核心链路（导入 → 展示 → 详情）
+
+### Task 1: 修复前后端数据格式对接
+当前前端 questions/page.tsx 和后端 API 返回格式不匹配。
+
+后端 `GET /api/v1/questions/` 返回格式：
+```json
+{
+  "total": 10,
+  "offset": 0,
+  "limit": 50,
+  "items": [
+    {
+      "id": "uuid-string",
+      "title": "...",
+      "question_type": "concept",
+      "domain_type": "RAG",
+      "difficulty_level": 3
+    }
+  ]
+}
+```
+
+前端当前代码直接当数组用（`setQuestions(res.data)`），而且字段名也不对。
+
+**修复要求：**
+- 修改 `web/src/app/questions/page.tsx` 正确解析 `{ items, total }` 格式
+- 接口字段映射：`question_type` 显示为类型标签，`domain_type` 显示为分类
+- `difficulty_level` 是 1-5 整数，需要转换为显示文本
+- 添加搜索/筛选功能：按 domain_type 过滤、按 difficulty_level 过滤
+- 给题目列表项添加点击跳转到详情页的链接
+
+### Task 2: 创建题目详情页
+创建 `web/src/app/questions/[id]/page.tsx`：
+
+- 调用 `GET /api/v1/questions/{id}/detail` 获取完整数据
+- 展示：标题、内容（用 markdown 风格展示）、来源、分类、难度、标签、知识节点
+- 添加 "生成讲解" 按钮（暂时调用 `POST /api/v1/questions/{id}/explain`，如果接口不存在则留 TODO）
+- 返回按钮返回列表
+
+后端 `/detail` 返回格式参考 `question_routes.py` 的 `get_question_detail` 端点。
+
+### Task 3: 创建可复用的题目卡片组件
+创建 `web/src/components/QuestionCard.tsx`：
+- 接收题目对象，展示标题、类型标签、难度徽标、分类标签
+- 支持点击跳转
+- 使用 Tailwind CSS 样式
+
+### Task 4: 修复导入页面
+当前 `web/src/app/import/page.tsx` 的表单提交需要：
+- POST 到 `/api/v1/import/text`，使用 FormData 格式（`text` 字段）
+- 成功后显示提取结果（题目数量、知识节点数）
+- 添加跳转到题目列表的链接
+
+### Task 5: 端到端测试
+1. 创建 `test_import.py` 脚本，用真实面试文本测试后端导入链路：
+   - 一段包含 3-5 个技术面试问题的文本
+   - 调用 `/api/v1/import/text` 接口
+   - 打印提取结果
+   - 调用 `/api/v1/questions/` 验证题目入库
+   
+   运行: `D:\AI_Envs\pytorch_gpu\python.exe test_import.py`
+
+2. 确认后端仍在运行，如果不在则重启：
+   `D:\AI_Envs\pytorch_gpu\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000`
+   
+3. 在 web/ 目录运行 `npm run build` 确认无编译错误
+
+### Task 6: Git 提交
+完成所有修改后：
+```
+git add .
+git commit -m "feat: wire up frontend-backend integration, add question detail page, fix data formats"
+```
+
+## 技术约束
+- 项目根目录：D:\AI_Project\Surprise\Interview-Practice-App
+- 后端路径：backend/app/
+- 前端路径：web/src/
+- Python 解释器：D:\AI_Envs\pytorch_gpu\python.exe
+- 架构约束：所有 LLM 调用必须通过 LLMGateway
+- 前端使用 Next.js App Router + Tailwind CSS + axios
+
+## 重要提醒
+- 先阅读现有代码再修改，不要覆盖已有功能
+- 修改每个文件前先 read 确认当前内容
+- API 代理已在 next.config.mjs 配置：/api/* → http://localhost:8000/api/*
+- 如果后端 8000 端口不通，先检查并重启 uvicorn
+
+请一步步执行上述 6 个 Task。

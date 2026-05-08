@@ -169,7 +169,6 @@ export default function QuestionDetailPage() {
 
   // 生成讲解
   const [generating, setGenerating] = useState(false);
-  const [selectedDepth, setSelectedDepth] = useState<"brief" | "standard" | "deep">("standard");
   const [generatedExplanation, setGeneratedExplanation] = useState<string | null>(null);
   const [generateDepth, setGenerateDepth] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -192,7 +191,6 @@ export default function QuestionDetailPage() {
     setGenerating(true);
     setGenerateError(null);
     setGenerateDepth(depth);
-    setSelectedDepth(depth);
     try {
       const res = await axios.post(`/api/v1/ai/explain`, {
         question_id: id,

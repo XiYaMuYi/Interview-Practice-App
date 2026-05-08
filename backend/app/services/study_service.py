@@ -71,7 +71,17 @@ class StudyService:
         if question_id:
             records = [r for r in records if r.question_id == question_id]
 
-        return [self._record_to_dict(r) for r in records]
+        # Enrich with question titles
+        result = []
+        for r in records:
+            d = self._record_to_dict(r)
+            if r.question_id:
+                question = await self.session.get(Question, r.question_id)
+                d["question_title"] = question.title if question else None
+            else:
+                d["question_title"] = None
+            result.append(d)
+        return result
 
     async def get_records_for_question(self, question_id: UUID) -> list[dict]:
         """Get all study records for a specific question."""

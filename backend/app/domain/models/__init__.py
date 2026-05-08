@@ -1,4 +1,4 @@
-"""SQLModel domain entities 閳?mirrors 03_Database_Schema.md."""
+"""SQLModel domain entities — mirrors 03_Database_Schema.md."""
 
 import uuid
 from datetime import datetime
@@ -6,10 +6,10 @@ from datetime import datetime
 from sqlmodel import Field, Relationship, SQLModel
 
 
-# 閳光偓閳光偓 SQLAlchemy column helpers (pgvector + JSONB) 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── SQLAlchemy column helpers (pgvector + JSONB) ──
+
 
 def _jsonb_column():
-    """Return a JSONB column type for PostgreSQL."""
     from sqlalchemy import Column
     from sqlalchemy.dialects.postgresql import JSONB
     return Column(JSONB)
@@ -30,7 +30,7 @@ def _vector_column():
         return Column(VectorType)
 
 
-# 閳光偓閳光偓 Questions 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Questions ──
 
 class Question(SQLModel, table=True):
     __tablename__ = "questions"
@@ -69,7 +69,7 @@ class Question(SQLModel, table=True):
     chat_histories: list["ChatHistory"] = Relationship(back_populates="question")
 
 
-# 閳光偓閳光偓 Tags 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Tags ──
 
 class Tag(SQLModel, table=True):
     __tablename__ = "tags"
@@ -87,7 +87,7 @@ class Tag(SQLModel, table=True):
     questions: list["QuestionTag"] = Relationship(back_populates="tag")
 
 
-# 閳光偓閳光偓 Question_Tags 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Question_Tags ──
 
 class QuestionTag(SQLModel, table=True):
     __tablename__ = "question_tags"
@@ -105,7 +105,7 @@ class QuestionTag(SQLModel, table=True):
     tag: "Tag" = Relationship(back_populates="questions")
 
 
-# 閳光偓閳光偓 Knowledge_Nodes 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Knowledge_Nodes ──
 
 class KnowledgeNode(SQLModel, table=True):
     __tablename__ = "knowledge_nodes"
@@ -129,7 +129,7 @@ class KnowledgeNode(SQLModel, table=True):
     questions: list["QuestionKnowledgeNode"] = Relationship(back_populates="knowledge_node")
 
 
-# 閳光偓閳光偓 Question_Knowledge_Nodes 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Question_Knowledge_Nodes ──
 
 class QuestionKnowledgeNode(SQLModel, table=True):
     __tablename__ = "question_knowledge_nodes"
@@ -147,7 +147,7 @@ class QuestionKnowledgeNode(SQLModel, table=True):
     knowledge_node: "KnowledgeNode" = Relationship(back_populates="questions")
 
 
-# 閳光偓閳光偓 Study_Records 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Study_Records ──
 
 class StudyRecord(SQLModel, table=True):
     __tablename__ = "study_records"
@@ -174,7 +174,7 @@ class StudyRecord(SQLModel, table=True):
     question: "Question | None" = Relationship(back_populates="study_records")
 
 
-# 閳光偓閳光偓 Chat_Histories 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Chat_Histories ──
 
 class ChatHistory(SQLModel, table=True):
     __tablename__ = "chat_histories"
@@ -196,7 +196,7 @@ class ChatHistory(SQLModel, table=True):
     question: "Question | None" = Relationship(back_populates="chat_histories")
 
 
-# 閳光偓閳光偓 Files 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Files ──
 
 class File(SQLModel, table=True):
     __tablename__ = "files"
@@ -214,7 +214,7 @@ class File(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-# 閳光偓閳光偓 Question_Embeddings 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Question_Embeddings ──
 
 class QuestionEmbedding(SQLModel, table=True):
     __tablename__ = "question_embeddings"
@@ -231,7 +231,7 @@ class QuestionEmbedding(SQLModel, table=True):
     question: "Question" = Relationship(back_populates="embeddings")
 
 
-# 閳光偓閳光偓 Prompt_Versions 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Prompt_Versions ──
 
 class PromptVersion(SQLModel, table=True):
     __tablename__ = "prompt_versions"
@@ -246,7 +246,7 @@ class PromptVersion(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-# 閳光偓閳光偓 Learning_Profiles 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Learning_Profiles ──
 
 class LearningProfile(SQLModel, table=True):
     __tablename__ = "learning_profiles"
@@ -263,7 +263,7 @@ class LearningProfile(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-# 閳光偓閳光偓 Expose metadata for Alembic 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+# ── Expose metadata for Alembic ──
 
 Base = SQLModel.metadata
 

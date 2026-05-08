@@ -10,6 +10,16 @@ from app.services.question_service import QuestionService
 router = APIRouter()
 
 
+@router.post("/extract")
+async def extract_questions(session: DbSession, text: str, source_type: str = Query("paste", max_length=50)):
+    """Extract questions from raw text using LLM and save to database."""
+    from app.services.import_service import ImportService
+
+    service = ImportService(session)
+    result = await service.import_text(text, source_type=source_type)
+    return result
+
+
 @router.get("/")
 async def list_questions(
     session: DbSession,

@@ -28,7 +28,14 @@ class LLMGateway:
     def __init__(self) -> None:
         self.provider_name = settings.LLM_PROVIDER
         self.model_name = settings.LLM_MODEL_NAME
-        self._provider = self._init_provider()
+        self._provider = None
+
+    @property
+    def provider(self):
+        """Lazily initialize the provider on first access."""
+        if self._provider is None:
+            self._provider = self._init_provider()
+        return self._provider
 
     def _init_provider(self):
         if self.provider_name == "dashscope":
@@ -50,7 +57,7 @@ class LLMGateway:
         """Send a chat-completion request and return the assistant content."""
         logger.info(f"LLM chat: model={model or self.model_name}, messages={len(messages)}, temp={temperature}")
         try:
-            return await self._provider.chat_completion(
+            return await self.provider.chat_completion(
                 messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -70,7 +77,7 @@ class LLMGateway:
         """Send a chat-completion request expecting JSON output."""
         logger.info(f"LLM chat (json): model={model or self.model_name}, messages={len(messages)}")
         try:
-            return await self._provider.chat_completion_json(
+            return await self.provider.chat_completion_json(
                 messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -92,7 +99,7 @@ class LLMGateway:
         """Yield text chunks from a streaming chat response."""
         logger.info(f"LLM stream: model={model or self.model_name}, messages={len(messages)}")
         try:
-            async for chunk in self._provider.stream_chat_completion(
+            async for chunk in self.provider.stream_chat_completion(
                 messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -109,7 +116,7 @@ class LLMGateway:
         """Generate embeddings for a list of texts."""
         logger.info(f"LLM embed: texts={len(texts)}")
         try:
-            return await self._provider.embedding(texts, model=model or settings.EMBEDDING_MODEL_PATH, dimensions=dimensions)
+            return await self.provider.embedding(texts, model=model or settings.EMBEDDING_MODEL_PATH, dimensions=dimensions)
         except Exception as e:
             raise LLMProviderError(self.provider_name, str(e))
 

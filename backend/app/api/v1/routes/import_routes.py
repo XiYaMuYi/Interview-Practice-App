@@ -28,6 +28,18 @@ async def import_file(session: DbSession, file: UploadFile = File(...)):
     return {"status": "success", **result}
 
 
+@router.post("/upload")
+async def upload_file(session: DbSession, file: UploadFile = File(...)):
+    """Upload a file for parsing and question extraction (alias for /file)."""
+    content = await file.read()
+    if not content:
+        raise ParseError("Uploaded file is empty")
+
+    service = ImportService(session)
+    result = await service.import_file(file_name=file.filename or "unknown", content=content)
+    return {"status": "success", **result}
+
+
 @router.get("/supported-formats")
 async def supported_formats():
     """Return list of supported file extensions for import."""

@@ -169,7 +169,10 @@ export default function QuestionDetailPage() {
 
   // 生成讲解
   const [generating, setGenerating] = useState(false);
+  const [selectedDepth, setSelectedDepth] = useState<"brief" | "standard" | "deep">("standard");
   const [generatedExplanation, setGeneratedExplanation] = useState<string | null>(null);
+  const [generateDepth, setGenerateDepth] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetch() {
@@ -185,14 +188,26 @@ export default function QuestionDetailPage() {
     fetch();
   }, [id]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (depth: "brief" | "standard" | "deep") => {
     setGenerating(true);
+    setGenerateError(null);
+    setGenerateDepth(depth);
+    setSelectedDepth(depth);
     try {
-      const res = await axios.post(`/api/v1/questions/${id}/explain`);
-      setGeneratedExplanation(res.data.explanation || res.data.content || JSON.stringify(res.data));
+      const res = await axios.post(`/api/v1/ai/explain`, {
+        question_id: id,
+        depth,
+      });
+      const data = res.data;
+      // Show answer_detail if present, otherwise explanation, otherwise short answer
+      const content = data.answer_detail || data.explanation || data.answer_short || JSON.stringify(data);
+      setGeneratedExplanation(content);
+      // If the server returned answer_detail, also store it in detail so it shows persistently
+      if (data.answer_detail) {
+        setDetail((prev) => prev ? { ...prev, answer_detail: data.answer_detail } : prev);
+      }
     } catch {
-      // 接口可能尚未实现
-      setGeneratedExplanation("生成讲解接口尚未实现，后端待开发。");
+      setGenerateError("生成讲解失败，请检查网络连接或后端服务状态");
     } finally {
       setGenerating(false);
     }
@@ -367,20 +382,50 @@ export default function QuestionDetailPage() {
         </section>
       )}
 
-      {/* Generate explanation button */}
-      <div className="mt-8 flex gap-4">
-        <button
-          onClick={handleGenerate}
-          disabled={generating}
-          className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {generating ? "生成中..." : "生成讲解"}
-        </button>
-      </div>
+      {/* Generate explanation button group */}
+      <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">AI 讲解</h2>
+        <div className="flex flex-wrap gap-3 mb-4">
+          {([
+            { value: "brief", label: "简要" },
+            { value: "standard", label: "标准" },
+            { value: "deep", label: "深入" },
+          ] as const).map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => handleGenerate(value)}
+              disabled={generating}
+              className={`px-5 py-2 rounded-lg font-medium transition-colors ${
+                generateDepth === value && generating
+                  ? "bg-blue-600 text-white opacity-50"
+                  : generateDepth === value
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              } disabled:cursor-not-allowed`}
+            >
+              {generateDepth === value && generating ? "生成中..." : label}
+            </button>
+          ))}
+        </div>
 
+        {generateError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            {generateError}
+          </div>
+        )}
+      </section>
+
+      {/* Generated explanation */}
       {generatedExplanation && (
-        <section className="bg-amber-50 border border-amber-200 rounded-lg p-6 mt-6">
-          <h2 className="text-lg font-semibold text-amber-900 mb-3">AI 生成的讲解</h2>
+        <section className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+          <h2 className="text-lg font-semibold text-blue-900 mb-3">
+            AI 讲解
+            {generateDepth && (
+              <span className="ml-2 text-sm font-normal text-blue-600">
+                （{generateDepth === "brief" ? "简要" : generateDepth === "standard" ? "标准" : "深入"}）
+              </span>
+            )}
+          </h2>
           <MarkdownContent text={generatedExplanation} />
         </section>
       )}

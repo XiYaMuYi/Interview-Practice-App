@@ -37,6 +37,12 @@ export default function RootLayout({
               </Link>
               <div className="flex gap-6">
                 <Link
+                  href="/"
+                  className="text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  首页
+                </Link>
+                <Link
                   href="/questions"
                   className="text-gray-600 hover:text-gray-900 transition-colors"
                 >
@@ -53,6 +59,18 @@ export default function RootLayout({
                   className="text-gray-600 hover:text-gray-900 transition-colors"
                 >
                   学习
+                </Link>
+                <Link
+                  href="/interview"
+                  className="text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  面试
+                </Link>
+                <Link
+                  href="/stats"
+                  className="text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  统计
                 </Link>
               </div>
             </div>

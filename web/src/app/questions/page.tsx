@@ -25,6 +25,9 @@ export default function QuestionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // search
+  const [searchQuery, setSearchQuery] = useState("");
+
   // filters
   const [domainFilter, setDomainFilter] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState("");
@@ -33,19 +36,27 @@ export default function QuestionsPage() {
     setLoading(true);
     setError(null);
     try {
-      const params: Record<string, string | number> = { offset: 0, limit: 200 };
-      if (domainFilter) params.domain_type = domainFilter;
-      if (difficultyFilter) params.difficulty_level = parseInt(difficultyFilter, 10);
+      if (searchQuery.trim()) {
+        const res = await axios.get<ListResponse>("/api/v1/questions/search", {
+          params: { q: searchQuery.trim(), limit: 100 },
+        });
+        setQuestions(res.data.items);
+        setTotal(res.data.total);
+      } else {
+        const params: Record<string, string | number> = { offset: 0, limit: 200 };
+        if (domainFilter) params.domain_type = domainFilter;
+        if (difficultyFilter) params.difficulty_level = parseInt(difficultyFilter, 10);
 
-      const res = await axios.get<ListResponse>("/api/v1/questions/", { params });
-      setQuestions(res.data.items);
-      setTotal(res.data.total);
+        const res = await axios.get<ListResponse>("/api/v1/questions/", { params });
+        setQuestions(res.data.items);
+        setTotal(res.data.total);
+      }
     } catch {
       setError("获取题目失败，请确保后端服务正在运行");
     } finally {
       setLoading(false);
     }
-  }, [domainFilter, difficultyFilter]);
+  }, [searchQuery, domainFilter, difficultyFilter]);
 
   useEffect(() => {
     fetchQuestions();
@@ -80,6 +91,43 @@ export default function QuestionsPage() {
             共 {total} 道
           </span>
         </h1>
+      </div>
+
+      {/* Search */}
+      <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            fetchQuestions();
+          }}
+          className="flex gap-3"
+        >
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索题目标题或内容关键词…"
+            className="flex-1 border border-gray-300 rounded-md px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          />
+          <button
+            type="submit"
+            className="bg-blue-600 text-white px-6 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+          >
+            搜索
+          </button>
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                fetchQuestions();
+              }}
+              className="text-sm text-gray-600 hover:text-gray-800 transition-colors px-3"
+            >
+              清除
+            </button>
+          )}
+        </form>
       </div>
 
       {/* Filters */}

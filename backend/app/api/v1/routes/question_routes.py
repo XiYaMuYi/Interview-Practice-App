@@ -57,6 +57,32 @@ async def list_questions(
     }
 
 
+@router.get("/search")
+async def search_questions(
+    session: DbSession,
+    q: str = Query(..., min_length=1, description="Search keyword"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Search questions by title/content keywords using SQL LIKE."""
+    service = QuestionService(session)
+    questions = await service.list_questions(query=q, offset=0, limit=limit)
+    return {
+        "total": len(questions),
+        "limit": limit,
+        "query": q,
+        "items": [
+            {
+                "id": str(qq.id),
+                "title": qq.title,
+                "question_type": qq.question_type,
+                "domain_type": qq.domain_type,
+                "difficulty_level": qq.difficulty_level,
+            }
+            for qq in questions
+        ],
+    }
+
+
 @router.get("/{question_id}")
 async def get_question(session: DbSession, question_id: UUID):
     """Get a single question by ID."""

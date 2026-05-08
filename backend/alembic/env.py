@@ -45,6 +45,9 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
     asyncio.run(run_async_migrations())
 
 

@@ -169,18 +169,18 @@ class StudyService:
         """Get aggregated study statistics."""
         # Total sessions
         total_stmt = select(func.count()).select_from(StudyRecord)
-        total_sessions = (await self.session.exec(total_stmt)).one()
+        total_sessions = (await self.session.exec(total_stmt)).one()[0]
 
         # By type
         review_stmt = select(func.count()).select_from(StudyRecord).where(
             StudyRecord.study_type == "review"
         )
-        total_reviews = (await self.session.exec(review_stmt)).one()
+        total_reviews = (await self.session.exec(review_stmt)).one()[0]
 
         practice_stmt = select(func.count()).select_from(StudyRecord).where(
             StudyRecord.study_type == "practice"
         )
-        total_practice = (await self.session.exec(practice_stmt)).one()
+        total_practice = (await self.session.exec(practice_stmt)).one()[0]
 
         # Average score (where score is not null)
         avg_stmt = (
@@ -188,7 +188,7 @@ class StudyService:
             .select_from(StudyRecord)
             .where(StudyRecord.ai_score.isnot(None))
         )
-        avg_result = (await self.session.exec(avg_stmt)).one()
+        avg_result = (await self.session.exec(avg_stmt)).one()[0]
         average_score = round(float(avg_result), 2) if avg_result else None
 
         # Mastered questions (review_result = mastered)
@@ -196,7 +196,7 @@ class StudyService:
             StudyRecord.review_result == "mastered",
             StudyRecord.question_id.isnot(None),
         )
-        questions_mastered = (await self.session.exec(mastered_stmt)).one()
+        questions_mastered = (await self.session.exec(mastered_stmt)).one()[0]
 
         # Pending review (next_review_at in the past)
         pending_stmt = (
@@ -208,7 +208,7 @@ class StudyService:
                 StudyRecord.next_review_at <= datetime.utcnow(),
             )
         )
-        questions_pending = (await self.session.exec(pending_stmt)).one()
+        questions_pending = (await self.session.exec(pending_stmt)).one()[0]
 
         return {
             "total_sessions": total_sessions,

@@ -121,7 +121,7 @@ class KnowledgeNode(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    parent: "KnowledgeNode | None" = Relationship(
+    parent: "KnowledgeNode" = Relationship(
         back_populates="children",
         sa_relationship_kwargs={"remote_side": "KnowledgeNode.id"},
     )
@@ -171,7 +171,7 @@ class StudyRecord(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    question: "Question | None" = Relationship(back_populates="study_records")
+    question: "Question" = Relationship(back_populates="study_records")
 
 
 # ── Chat_Histories ──
@@ -193,7 +193,7 @@ class ChatHistory(SQLModel, table=True):
     extra_data: dict | None = Field(default=None, sa_column=_jsonb_column())
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    question: "Question | None" = Relationship(back_populates="chat_histories")
+    question: "Question" = Relationship(back_populates="chat_histories")
 
 
 # ── Files ──

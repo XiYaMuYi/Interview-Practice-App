@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any, Generic, Sequence, TypeVar
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 if TYPE_CHECKING:
     from app.domain.models import (
@@ -28,7 +28,7 @@ ModelT = TypeVar("ModelT", bound=SQLModel)
 class BaseRepository(Generic[ModelT]):
     """Minimal async CRUD over SQLModel entities."""
 
-    def __init__(self, model: type[ModelT], session: AsyncSession):
+    def __init__(self, model: type[ModelT], session: SQLModelAsyncSession):
         self.model = model
         self.session = session
 
@@ -105,7 +105,7 @@ class BaseRepository(Generic[ModelT]):
 
 
 class QuestionRepository(BaseRepository["Question"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import Question as QuestionModel
         super().__init__(QuestionModel, session)
 
@@ -141,7 +141,7 @@ class QuestionRepository(BaseRepository["Question"]):
 
 
 class TagRepository(BaseRepository["Tag"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import Tag as TagModel
         super().__init__(TagModel, session)
 
@@ -152,19 +152,19 @@ class TagRepository(BaseRepository["Tag"]):
 
 
 class KnowledgeNodeRepository(BaseRepository["KnowledgeNode"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import KnowledgeNode as KnowledgeNodeModel
         super().__init__(KnowledgeNodeModel, session)
 
 
 class StudyRecordRepository(BaseRepository["StudyRecord"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import StudyRecord as StudyRecordModel
         super().__init__(StudyRecordModel, session)
 
 
 class ChatHistoryRepository(BaseRepository["ChatHistory"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import ChatHistory as ChatHistoryModel
         super().__init__(ChatHistoryModel, session)
 
@@ -179,7 +179,7 @@ class ChatHistoryRepository(BaseRepository["ChatHistory"]):
 
 
 class FileRepository(BaseRepository["File"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import File as FileModel
         super().__init__(FileModel, session)
 
@@ -190,18 +190,18 @@ class FileRepository(BaseRepository["File"]):
 
 
 class QuestionEmbeddingRepository(BaseRepository["QuestionEmbedding"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import QuestionEmbedding as QuestionEmbeddingModel
         super().__init__(QuestionEmbeddingModel, session)
 
 
 class LearningProfileRepository(BaseRepository["LearningProfile"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import LearningProfile as LearningProfileModel
         super().__init__(LearningProfileModel, session)
 
 
 class PromptVersionRepository(BaseRepository["PromptVersion"]):
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import PromptVersion as PromptVersionModel
         super().__init__(PromptVersionModel, session)

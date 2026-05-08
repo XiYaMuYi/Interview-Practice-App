@@ -60,6 +60,29 @@ class QuestionService:
             raise NotFoundError("Question", str(question_id))
         return question
 
+    async def get_question_with_relations(self, question_id: UUID) -> Question:
+        """Get a question with tags and knowledge_nodes eagerly loaded."""
+        from sqlalchemy.orm import selectinload
+
+        question = await self.question_repo.get_by_id(question_id)
+        if question is None or question.deleted_at is not None:
+            raise NotFoundError("Question", str(question_id))
+
+        # Eagerly load relationships
+        await self.session.refresh(question, attribute_names=["tags", "knowledge_nodes"])
+
+        # Load nested tag and knowledge_node relationships
+        for qt in (question.tags or []):
+            if qt.tag_id and not hasattr(qt, "_tag_loaded"):
+                tag = await self.session.get(Tag, qt.tag_id)
+                qt.tag = tag  # type: ignore[attr-defined]
+        for qkn in (question.knowledge_nodes or []):
+            if qkn.knowledge_node_id and not hasattr(qkn, "_kn_loaded"):
+                kn = await self.session.get(KnowledgeNode, qkn.knowledge_node_id)
+                qkn.knowledge_node = kn  # type: ignore[attr-defined]
+
+        return question
+
     async def list_questions(
         self,
         *,

@@ -148,7 +148,7 @@ async def embed_question(session: DbSession, question_id: UUID):
 async def get_question_detail(session: DbSession, question_id: UUID):
     """Get full question detail including tags and knowledge nodes."""
     service = QuestionService(session)
-    question = await service.get_question(question_id)
+    question = await service.get_question_with_relations(question_id)
 
     detail = {
         "id": str(question.id),

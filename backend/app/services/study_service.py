@@ -83,6 +83,49 @@ class StudyService:
             result.append(d)
         return result
 
+    async def get_study_records_with_count(
+        self,
+        *,
+        question_id: UUID | None = None,
+        study_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict], int]:
+        """List study records with real total count."""
+        offset = (page - 1) * page_size
+        filters = {}
+        if study_type:
+            filters["study_type"] = study_type
+
+        records, total = await self.study_repo.list_with_count(
+            offset=offset, limit=page_size, filters=filters
+        )
+
+        # Filter by question_id if provided
+        if question_id:
+            records = [r for r in records if r.question_id == question_id]
+            # Re-count with question_id filter for accurate total
+            from sqlalchemy import func
+            q_filter_stmt = (
+                __import__("sqlalchemy").select(func.count())
+                .select_from(StudyRecord)
+                .where(StudyRecord.question_id == question_id)
+            )
+            if study_type:
+                q_filter_stmt = q_filter_stmt.where(StudyRecord.study_type == study_type)
+            total = (await self.session.exec(q_filter_stmt)).one()
+
+        result = []
+        for r in records:
+            d = self._record_to_dict(r)
+            if r.question_id:
+                question = await self.session.get(Question, r.question_id)
+                d["question_title"] = question.title if question else None
+            else:
+                d["question_title"] = None
+            result.append(d)
+        return result, total
+
     async def get_records_for_question(self, question_id: UUID) -> list[dict]:
         """Get all study records for a specific question."""
         records = await self.study_repo.list(
@@ -172,6 +215,62 @@ class StudyService:
                     }
                 )
         return items
+
+    async def get_review_list_with_count(
+        self, *, page: int = 1, page_size: int = 20
+    ) -> tuple[list[dict], int]:
+        """Get questions due for review with real total count and pagination."""
+        now = datetime.utcnow()
+
+        # Count query
+        from sqlalchemy import func
+
+        count_stmt = (
+            select(func.count(func.distinct(StudyRecord.question_id)))
+            .where(
+                StudyRecord.study_type == "review",
+                StudyRecord.question_id.isnot(None),
+                StudyRecord.next_review_at.isnot(None),
+                StudyRecord.next_review_at <= now,
+            )
+        )
+        total = (await self.session.exec(count_stmt)).one()
+
+        # Data query with pagination
+        offset = (page - 1) * page_size
+        stmt = (
+            select(
+                StudyRecord.question_id,
+                StudyRecord.next_review_at,
+            )
+            .where(
+                StudyRecord.study_type == "review",
+                StudyRecord.question_id.isnot(None),
+                StudyRecord.next_review_at.isnot(None),
+                StudyRecord.next_review_at <= now,
+            )
+            .order_by(StudyRecord.next_review_at.asc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        result = await self.session.exec(stmt)
+        due_records = result.all()
+
+        items = []
+        for qid, next_review in due_records:
+            question = await self.session.get(Question, qid)
+            if question and question.deleted_at is None:
+                items.append(
+                    {
+                        "question_id": qid,
+                        "question_title": question.title,
+                        "difficulty_level": question.difficulty_level,
+                        "mastery_level": question.mastery_level,
+                        "next_review_at": next_review,
+                        "review_status": question.review_status,
+                    }
+                )
+        return items, total
 
     # - Statistics -
 

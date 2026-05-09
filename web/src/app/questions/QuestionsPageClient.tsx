@@ -20,10 +20,11 @@ interface Question {
 }
 
 interface ListResponse {
-  total: number;
-  offset: number;
-  limit: number;
   items: Question[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
@@ -89,8 +90,8 @@ export default function QuestionsPageClient() {
         setTotal(res.data.total);
       } else {
         const params: Record<string, string | number> = {
-          offset: (page - 1) * pageSize,
-          limit: pageSize,
+          page,
+          page_size: pageSize,
         };
         if (domainFilter) params.domain_type = domainFilter;
         if (difficultyFilter) params.difficulty_level = parseInt(difficultyFilter, 10);

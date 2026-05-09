@@ -106,6 +106,30 @@ class QuestionService:
             )
         )
 
+    async def list_questions_with_count(
+        self,
+        *,
+        query: str | None = None,
+        domain_type: str | None = None,
+        question_type: str | None = None,
+        difficulty_level: int | None = None,
+        source_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Question], int]:
+        """Return (items, total_count) using a real COUNT query."""
+        offset = (page - 1) * page_size
+        items, total = await self.question_repo.search_with_count(
+            query=query,
+            domain_type=domain_type,
+            question_type=question_type,
+            difficulty_level=difficulty_level,
+            source_type=source_type,
+            offset=offset,
+            limit=page_size,
+        )
+        return list(items), total
+
     async def update_question(self, question_id: UUID, updates: dict) -> Question:
         question = await self.question_repo.get_by_id(question_id)
         if question is None:

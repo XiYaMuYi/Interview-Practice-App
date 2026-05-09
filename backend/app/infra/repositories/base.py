@@ -174,6 +174,63 @@ class QuestionRepository(BaseRepository["Question"]):
                 out.append(row)
         return out
 
+    async def search_with_count(
+        self,
+        *,
+        query: str | None = None,
+        domain_type: str | None = None,
+        question_type: str | None = None,
+        difficulty_level: int | None = None,
+        source_type: str | None = None,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[Sequence[Question], int]:
+        """Return (items, total_count) with a separate COUNT query."""
+        from sqlalchemy import or_, func
+
+        # Build the base filter conditions
+        conditions = [self.model.deleted_at.is_(None)]
+        if query:
+            conditions.append(
+                or_(
+                    self.model.title.ilike(f"%{query}%"),
+                    self.model.content.ilike(f"%{query}%"),
+                )
+            )
+        if domain_type:
+            conditions.append(self.model.domain_type == domain_type)
+        if question_type:
+            conditions.append(self.model.question_type == question_type)
+        if difficulty_level is not None:
+            conditions.append(self.model.difficulty_level == difficulty_level)
+        if source_type:
+            conditions.append(self.model.source_type == source_type)
+
+        # Count query
+        count_stmt = select(func.count()).select_from(self.model).where(*conditions)
+        total = (await self.session.exec(count_stmt)).one()
+
+        # Data query
+        data_stmt = select(self.model).where(*conditions)
+        data_stmt = data_stmt.offset(offset).limit(limit).order_by(self.model.created_at.desc())
+        result = await self.session.exec(data_stmt)
+        rows = result.all()
+        out: list[Question] = []
+        for row in rows:
+            if isinstance(row, self.model):
+                out.append(row)
+            elif hasattr(row, "_mapping"):
+                mapping = dict(row._mapping)
+                if len(mapping) == 1:
+                    val = next(iter(mapping.values()))
+                    if isinstance(val, self.model):
+                        out.append(val)
+                        continue
+                out.append(self.model.model_validate(mapping))
+            else:
+                out.append(row)
+        return out, total
+
 
 class TagRepository(BaseRepository["Tag"]):
     def __init__(self, session: SQLModelAsyncSession):
@@ -196,6 +253,29 @@ class StudyRecordRepository(BaseRepository["StudyRecord"]):
     def __init__(self, session: SQLModelAsyncSession):
         from app.domain.models import StudyRecord as StudyRecordModel
         super().__init__(StudyRecordModel, session)
+
+    async def list_with_count(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+        filters: dict[str, Any] | None = None,
+    ) -> tuple[Sequence["StudyRecord"], int]:
+        """Return (items, total_count) with a separate COUNT query."""
+        from sqlalchemy import func
+
+        count_stmt = select(func.count()).select_from(self.model)
+        data_stmt = select(self.model)
+
+        if filters:
+            for key, value in filters.items():
+                count_stmt = count_stmt.where(getattr(self.model, key) == value)
+                data_stmt = data_stmt.where(getattr(self.model, key) == value)
+
+        total = (await self.session.exec(count_stmt)).one()
+        data_stmt = data_stmt.offset(offset).limit(limit).order_by(self.model.created_at.desc())
+        result = await self.session.exec(data_stmt)
+        return result.all(), total
 
 
 class ChatHistoryRepository(BaseRepository["ChatHistory"]):

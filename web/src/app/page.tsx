@@ -45,10 +45,11 @@ interface ResumeItem {
 }
 
 interface ListResponse {
-  total: number;
-  offset: number;
-  limit: number;
   items: Question[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -93,13 +94,13 @@ export default function HomePage() {
     try {
       const [statsRes, questionsRes, resumesRes] = await Promise.allSettled([
         axios.get<StudyStats>("/api/v1/study/stats"),
-        axios.get<ListResponse>("/api/v1/questions", { params: { offset: 0, limit: 5 } }),
-        axios.get<ResumeItem[]>("/api/v1/resumes", { params: { offset: 0, limit: 3 } }),
+        axios.get<ListResponse>("/api/v1/questions", { params: { page: 1, page_size: 5 } }),
+        axios.get<{ items: ResumeItem[] }>("/api/v1/resumes", { params: { page: 1, page_size: 3 } }),
       ]);
 
       if (statsRes.status === "fulfilled") setStats(statsRes.value.data);
       if (questionsRes.status === "fulfilled") setRecentQuestions(questionsRes.value.data.items);
-      if (resumesRes.status === "fulfilled") setRecentResumes(resumesRes.value.data);
+      if (resumesRes.status === "fulfilled") setRecentResumes(resumesRes.value.data.items);
     } catch {
       setError("加载概览数据失败");
     } finally {

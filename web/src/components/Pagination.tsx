@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
+import PageSizeSelector from "./pagination/PageSizeSelector";
+import PaginationSummary from "./pagination/PaginationSummary";
 
 interface PaginationProps {
   currentPage: number;
@@ -37,35 +39,41 @@ export default function Pagination({
     return pages;
   }, [currentPage, totalPages]);
 
-  const startItem = Math.min((currentPage - 1) * pageSize + 1, total);
-  const endItem = Math.min(currentPage * pageSize, total);
+  const btnClass = (active: boolean, disabled: boolean) =>
+    `px-3 py-1.5 text-sm rounded border transition-colors ${
+      active
+        ? "bg-blue-600 text-white border-blue-600"
+        : disabled
+          ? "border-gray-200 text-gray-300 cursor-not-allowed"
+          : "border-gray-300 hover:bg-gray-50 text-gray-700"
+    }`;
 
   return (
     <div className="flex items-center justify-between flex-wrap gap-4 pt-4 border-t">
       <div className="flex items-center gap-3">
-        <span className="text-sm text-gray-500">
-          共 {total} 条，显示 {startItem}–{endItem}
-        </span>
+        <PaginationSummary total={total} page={currentPage} pageSize={pageSize} />
         {onPageSizeChange && (
-          <select
-            value={pageSize}
-            onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            className="border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-          >
-            {pageSizeOptions.map((s) => (
-              <option key={s} value={s}>
-                {s} 条/页
-              </option>
-            ))}
-          </select>
+          <PageSizeSelector
+            pageSize={pageSize}
+            pageSizeOptions={pageSizeOptions}
+            onChange={onPageSizeChange}
+          />
         )}
       </div>
 
       <nav className="flex items-center gap-1">
         <button
+          onClick={() => onPageChange(1)}
+          disabled={currentPage <= 1}
+          className={btnClass(false, currentPage <= 1)}
+          title="首页"
+        >
+          首页
+        </button>
+        <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage <= 1}
-          className="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className={btnClass(false, currentPage <= 1)}
         >
           上一页
         </button>
@@ -73,17 +81,13 @@ export default function Pagination({
         {visiblePages.map((p, i) =>
           p === "..." ? (
             <span key={`e-${i}`} className="px-2 text-gray-400">
-              …
+              ...
             </span>
           ) : (
             <button
               key={p}
               onClick={() => onPageChange(p)}
-              className={`px-3 py-1.5 text-sm rounded border transition-colors ${
-                p === currentPage
-                  ? "bg-blue-600 text-white border-blue-600"
-                  : "border-gray-300 hover:bg-gray-50 text-gray-700"
-              }`}
+              className={btnClass(p === currentPage, false)}
             >
               {p}
             </button>
@@ -93,9 +97,17 @@ export default function Pagination({
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage >= totalPages}
-          className="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className={btnClass(false, currentPage >= totalPages)}
         >
           下一页
+        </button>
+        <button
+          onClick={() => onPageChange(totalPages)}
+          disabled={currentPage >= totalPages}
+          className={btnClass(false, currentPage >= totalPages)}
+          title="末页"
+        >
+          末页
         </button>
       </nav>
     </div>

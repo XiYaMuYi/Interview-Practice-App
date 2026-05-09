@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 
 from app.api.deps import DbSession
+from app.common.pagination import build_paginated_response
 from app.services.question_service import QuestionService
 
 router = APIRouter()
@@ -29,25 +30,22 @@ async def list_questions(
     question_type: str | None = Query(None),
     difficulty_level: int | None = Query(None, ge=1, le=5),
     source_type: str | None = Query(None, description="Filter by source: resume/file/text/manual/ai"),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     """List questions with optional filters."""
     service = QuestionService(session)
-    questions = await service.list_questions(
+    questions, total = await service.list_questions_with_count(
         query=query,
         domain_type=domain_type,
         question_type=question_type,
         difficulty_level=difficulty_level,
         source_type=source_type,
-        offset=offset,
-        limit=limit,
+        page=page,
+        page_size=page_size,
     )
-    return {
-        "total": len(questions),
-        "offset": offset,
-        "limit": limit,
-        "items": [
+    return build_paginated_response(
+        items=[
             {
                 "id": str(q.id),
                 "title": q.title,
@@ -58,7 +56,10 @@ async def list_questions(
             }
             for q in questions
         ],
-    }
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/search")

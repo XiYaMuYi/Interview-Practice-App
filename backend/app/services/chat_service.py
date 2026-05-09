@@ -64,6 +64,42 @@ class ChatService:
             })
         return sessions
 
+    async def get_sessions_with_count(
+        self, *, page: int = 1, page_size: int = 20
+    ) -> tuple[list[dict], int]:
+        """List chat sessions with real total count."""
+        from sqlalchemy import func as sa_func
+
+        offset = (page - 1) * page_size
+
+        # Count distinct sessions
+        count_stmt = select(sa_func.count(sa_func.distinct(ChatHistory.session_id)))
+        total = (await self.session.exec(count_stmt)).one()
+
+        # Data query
+        stmt = (
+            select(ChatHistory.session_id, ChatHistory.created_at)
+            .group_by(ChatHistory.session_id, ChatHistory.created_at)
+            .order_by(ChatHistory.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        result = await self.session.exec(stmt)
+        rows = result.all()
+
+        sessions = []
+        for row in rows:
+            count_stmt = select(sa_func.count()).select_from(ChatHistory).where(
+                ChatHistory.session_id == row[0]
+            )
+            count_result = await self.session.exec(count_stmt)
+            sessions.append({
+                "session_id": row[0],
+                "created_at": row[1],
+                "message_count": count_result.one(),
+            })
+        return sessions, total
+
     # ── Message History ─────────────────────────────────────────────
 
     async def get_history(self, session_id: str) -> list[ChatHistory]:

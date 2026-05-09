@@ -108,7 +108,7 @@ export default function StatsPage() {
         const [statsRes, recordsRes] = await Promise.allSettled([
           axios.get<StudyStats>("/api/v1/study/stats"),
           axios.get<{ items: StudyRecord[]; total?: number }>("/api/v1/study/records", {
-            params: { offset: (page - 1) * limit, limit },
+            params: { page, page_size: limit },
           }),
         ]);
 

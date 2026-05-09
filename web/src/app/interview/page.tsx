@@ -92,8 +92,8 @@ export default function InterviewPage() {
     const loadResumes = async () => {
       setLoadingResumes(true);
       try {
-        const res = await axios.get("/api/v1/resumes", { params: { limit: 20 } });
-        setResumes(res.data);
+        const res = await axios.get("/api/v1/resumes", { params: { page: 1, page_size: 20 } });
+        setResumes(res.data.items);
         setResumesLoaded(true);
       } catch {
         // silently ignore — EmptyState will handle it

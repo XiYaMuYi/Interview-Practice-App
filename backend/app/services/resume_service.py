@@ -146,6 +146,36 @@ class ResumeService:
             )
         )
 
+    async def list_resumes_with_count(
+        self, *, page: int = 1, page_size: int = 20
+    ) -> tuple[list[Resume], int]:
+        """List resumes with real total count."""
+        from sqlalchemy import func
+
+        offset = (page - 1) * page_size
+
+        # Count non-deleted resumes
+        count_stmt = (
+            __import__("sqlalchemy")
+            .select(func.count())
+            .select_from(Resume)
+            .where(Resume.deleted_at.is_(None))
+        )
+        total = (await self.session.exec(count_stmt)).one()
+
+        # Data query
+        from sqlalchemy import select as sa_select
+
+        data_stmt = (
+            sa_select(Resume)
+            .where(Resume.deleted_at.is_(None))
+            .offset(offset)
+            .limit(page_size)
+            .order_by(Resume.created_at.desc())
+        )
+        result = await self.session.exec(data_stmt)
+        return list(result.all()), total
+
     async def delete_resume(self, resume_id: UUID) -> bool:
         return await self.resume_repo.soft_delete(resume_id)
 

@@ -191,8 +191,8 @@ function PracticeMode() {
     setListError(null);
     try {
       const params: Record<string, string | number> = {
-        offset: (page - 1) * limit,
-        limit,
+        page,
+        page_size: limit,
       };
       if (domainFilter) params.domain_type = domainFilter;
       if (difficultyFilter) params.difficulty_level = parseInt(difficultyFilter, 10);
@@ -556,7 +556,7 @@ function ReviewMode() {
     setError(null);
     try {
       const res = await axios.get("/api/v1/study/review-list", {
-        params: { offset: (page - 1) * limit, limit },
+        params: { page, page_size: limit },
       });
       setReviewItems(res.data.items);
       setTotalReviews(res.data.total ?? res.data.items.length);

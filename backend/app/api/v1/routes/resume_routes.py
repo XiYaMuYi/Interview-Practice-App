@@ -2,9 +2,10 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Query, UploadFile
 
 from app.api.deps import DbSession
+from app.common.pagination import build_paginated_response
 from app.core.exceptions import ParseError
 from app.domain.schemas.resume_schemas import (
     ResumeExperienceRead,
@@ -58,16 +59,35 @@ async def parse_resume(
     return result
 
 
-@router.get("", response_model=list[ResumeRead])
+@router.get("")
 async def list_resumes(
     session: DbSession,
-    offset: int = 0,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
-    """List all uploaded resumes."""
+    """List all uploaded resumes with pagination."""
     service = ResumeService(session)
-    resumes = await service.list_resumes(offset=offset, limit=limit)
-    return resumes
+    resumes, total = await service.list_resumes_with_count(
+        page=page,
+        page_size=page_size,
+    )
+    return build_paginated_response(
+        items=[
+            {
+                "id": str(r.id),
+                "file_name": r.file_name,
+                "file_path": r.file_path,
+                "source_type": r.source_type,
+                "parse_status": r.parse_status,
+                "structured_summary": r.structured_summary,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in resumes
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/{resume_id}", response_model=ResumeRead)

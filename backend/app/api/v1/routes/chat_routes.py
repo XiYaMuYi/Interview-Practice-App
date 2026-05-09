@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import DbSession
+from app.common.pagination import build_paginated_response
 from app.domain.schemas import ChatHistoryResponse, ChatMessageRequest, ChatResponse, ChatSessionListResponse
 from app.services.chat_service import ChatService
 
@@ -20,16 +21,24 @@ async def create_chat_session(session: DbSession, mode: str = Query("chat", desc
     return {"session_id": session_id, "mode": mode}
 
 
-@router.get("/sessions", response_model=ChatSessionListResponse)
+@router.get("/sessions")
 async def list_sessions(
     session: DbSession,
-    offset: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     """List all chat sessions."""
     service = ChatService(session)
-    sessions = await service.get_sessions(offset=offset, limit=limit)
-    return ChatSessionListResponse(sessions=sessions, total=len(sessions))
+    sessions, total = await service.get_sessions_with_count(
+        page=page,
+        page_size=page_size,
+    )
+    return build_paginated_response(
+        items=sessions,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/history/{session_id}", response_model=ChatHistoryResponse)

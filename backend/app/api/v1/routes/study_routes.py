@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 
 from app.api.deps import DbSession
+from app.common.pagination import build_paginated_response
 from app.domain.schemas import (
     ReviewListItem,
     ReviewListResponse,
@@ -32,18 +33,23 @@ async def list_study_records(
     session: DbSession,
     question_id: UUID | None = Query(None),
     study_type: str | None = Query(None),
-    offset: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     """List study records with optional filters."""
     service = StudyService(session)
-    records = await service.get_study_records(
+    records, total = await service.get_study_records_with_count(
         question_id=question_id,
         study_type=study_type,
-        offset=offset,
-        limit=limit,
+        page=page,
+        page_size=page_size,
     )
-    return {"total": len(records), "items": records}
+    return build_paginated_response(
+        items=records,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/records/{question_id}")
@@ -67,13 +73,25 @@ async def record_review(session: DbSession, data: ReviewRequest):
     return record
 
 
-@router.get("/review-list", response_model=ReviewListResponse)
-async def get_review_list(session: DbSession, limit: int = Query(50, ge=1, le=200)):
+@router.get("/review-list")
+async def get_review_list(
+    session: DbSession,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
     """Get questions due for review."""
     service = StudyService(session)
-    items = await service.get_review_list(limit=limit)
+    items, total = await service.get_review_list_with_count(
+        page=page,
+        page_size=page_size,
+    )
     review_items = [ReviewListItem(**item) for item in items]
-    return ReviewListResponse(items=review_items, total=len(review_items))
+    return build_paginated_response(
+        items=[item.model_dump() for item in review_items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/stats", response_model=StudyStatsResponse)

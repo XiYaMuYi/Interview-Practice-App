@@ -90,6 +90,7 @@ class QuestionService:
         domain_type: str | None = None,
         question_type: str | None = None,
         difficulty_level: int | None = None,
+        source_type: str | None = None,
         offset: int = 0,
         limit: int = 50,
     ) -> list[Question]:
@@ -99,6 +100,7 @@ class QuestionService:
                 domain_type=domain_type,
                 question_type=question_type,
                 difficulty_level=difficulty_level,
+                source_type=source_type,
                 offset=offset,
                 limit=limit,
             )

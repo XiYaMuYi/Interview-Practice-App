@@ -3,6 +3,10 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import axios from "axios";
+import LoadingState from "@/components/LoadingState";
+import ErrorState from "@/components/ErrorState";
+import EmptyState from "@/components/EmptyState";
+import TaskStatusBadge from "@/components/TaskStatusBadge";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -19,6 +23,12 @@ interface StructuredSummary {
   years_of_experience?: number;
   top_skills?: string[];
   summary?: string;
+  project_experience?: Array<{
+    project_name?: string;
+    role?: string;
+    description?: string;
+    technologies?: string[];
+  }>;
   [key: string]: unknown;
 }
 
@@ -68,31 +78,42 @@ function formatDate(iso: string) {
   });
 }
 
+type TabKey = "questions" | "resume";
+
 export default function ImportPage() {
-  // Text import state
+  // Tab state
+  const [activeTab, setActiveTab] = useState<TabKey>("resume");
+
+  // ── Text import (questions tab) ──────────────────────────────────
+
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // File upload state
+  // ── File upload (resume tab) ─────────────────────────────────────
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<ResumeParseResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Saved resumes list state
+  // Saved resumes list
   const [savedResumes, setSavedResumes] = useState<ResumeRead[]>([]);
+  const [listLoading, setListLoading] = useState(true);
 
   // ── Resume list ──────────────────────────────────────────────────
 
   const fetchResumes = useCallback(async () => {
+    setListLoading(true);
     try {
       const res = await axios.get<ResumeRead[]>("/api/v1/resumes");
       setSavedResumes(res.data);
     } catch {
       // silently ignore — list is optional
+    } finally {
+      setListLoading(false);
     }
   }, []);
 
@@ -234,293 +255,430 @@ export default function ImportPage() {
     [triggerParse, fetchResumes]
   );
 
-  // ── Render helpers ───────────────────────────────────────────────
+  // ── Tab definitions ──────────────────────────────────────────────
 
-  const parseStatusBadge = (status: string) => {
-    const map: Record<string, { label: string; cls: string }> = {
-      parsed: { label: "已解析", cls: "bg-green-100 text-green-700" },
-      pending: { label: "待解析", cls: "bg-yellow-100 text-yellow-700" },
-      processing: { label: "解析中", cls: "bg-blue-100 text-blue-700" },
-      failed: { label: "解析失败", cls: "bg-red-100 text-red-700" },
-    };
-    const { label, cls } = map[status] ?? {
-      label: status,
-      cls: "bg-gray-100 text-gray-600",
-    };
-    return <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium ${cls}`}>{label}</span>;
-  };
+  const tabs: { key: TabKey; label: string; icon: string; description: string }[] = [
+    {
+      key: "questions",
+      label: "题目导入",
+      icon: "file-text",
+      description: "粘贴面经文本，AI 自动提取题目",
+    },
+    {
+      key: "resume",
+      label: "简历导入",
+      icon: "user",
+      description: "上传简历文件，AI 解析并生成针对性题目",
+    },
+  ];
 
   // ── Render ───────────────────────────────────────────────────────
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <h1 className="text-3xl font-bold text-gray-900 mb-2">导入题目</h1>
-      <p className="text-gray-600 mb-8">
-        粘贴面试题目文本或上传文件，系统将自动解析并导入
+      <h1 className="text-3xl font-bold text-gray-900 mb-2">导入</h1>
+      <p className="text-gray-600 mb-6">
+        通过文本粘贴或简历上传，快速构建你的面试题库
       </p>
 
-      {/* Text import */}
-      <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">文本导入</h2>
-        <label
-          htmlFor="import-text"
-          className="block text-sm font-medium text-gray-700 mb-2"
-        >
-          题目文本
-        </label>
-        <textarea
-          id="import-text"
-          rows={8}
-          className="w-full border border-gray-300 rounded-lg p-3 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y"
-          placeholder={`在此粘贴题目文本...\n\n示例格式：\n题目：什么是闭包？\n难度：3\n分类：Frontend\n\n题目：请解释 React 的虚拟 DOM\n难度：3\n分类：Frontend`}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-
-        <div className="mt-4 flex items-center gap-4">
+      {/* Tab Navigation */}
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-8">
+        {tabs.map((tab) => (
           <button
-            onClick={handleImport}
-            disabled={loading || !text.trim()}
-            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            key={tab.key}
+            onClick={() => {
+              setActiveTab(tab.key);
+              // Clear tab-specific state on switch
+              if (tab.key === "questions") {
+                setUploadResult(null);
+                setUploadError(null);
+              } else {
+                setResult(null);
+                setError(null);
+              }
+            }}
+            className={`flex-1 flex flex-col items-center gap-1 py-3 px-4 rounded-md text-sm font-medium transition-all ${
+              activeTab === tab.key
+                ? "bg-white text-gray-900 shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
           >
-            {loading ? "导入中..." : "导入"}
+            <span>{tab.label}</span>
+            <span className="text-xs text-gray-400 font-normal">{tab.description}</span>
           </button>
-          <button
-            onClick={() => setText("")}
-            className="px-4 py-2.5 text-gray-600 hover:text-gray-900 transition-colors"
-          >
-            清空
-          </button>
-        </div>
+        ))}
       </div>
 
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-          {error}
-        </div>
-      )}
+      {/* ── Tab: 题目导入 ──────────────────────────────────────── */}
+      {activeTab === "questions" && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-3">文本导入</h2>
+            <label
+              htmlFor="import-text"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
+              题目文本
+            </label>
+            <textarea
+              id="import-text"
+              rows={8}
+              className="w-full border border-gray-300 rounded-lg p-3 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y"
+              placeholder={`在此粘贴题目文本...\n\n示例格式：\n题目：什么是闭包？\n难度：3\n分类：Frontend\n\n题目：请解释 React 的虚拟 DOM\n难度：3\n分类：Frontend`}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
 
-      {result && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-green-700 font-medium">文本导入成功！</p>
-          <p className="text-green-600 text-sm mt-1">
-            提取 {result.questions_extracted} 道题目，{result.knowledge_nodes} 个知识节点。
-          </p>
-          <Link
-            href="/questions"
-            className="inline-block mt-3 text-sm text-blue-600 hover:underline"
-          >
-            查看题目列表 &rarr;
-          </Link>
-        </div>
-      )}
-
-      {/* File upload */}
-      <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">上传简历</h2>
-        <p className="text-sm text-gray-500 mb-4">
-          支持 PDF、DOCX、TXT、MD 格式
-        </p>
-
-        <div
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`
-            relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
-            transition-colors
-            ${
-              dragActive
-                ? "border-blue-500 bg-blue-50"
-                : "border-gray-300 hover:border-gray-400 bg-gray-50"
-            }
-            ${uploading ? "pointer-events-none opacity-60" : ""}
-          `}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.docx,.txt,.md"
-            onChange={handleFileSelect}
-            className="hidden"
-          />
-          {uploading ? (
-            <div className="flex flex-col items-center gap-3">
-              <svg
-                className="animate-spin h-8 w-8 text-blue-600"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
+            <div className="mt-4 flex items-center gap-4">
+              <button
+                onClick={handleImport}
+                disabled={loading || !text.trim()}
+                className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-              <span className="text-gray-600 font-medium">上传并解析中...</span>
+                {loading ? "导入中..." : "导入"}
+              </button>
+              <button
+                onClick={() => setText("")}
+                className="px-4 py-2.5 text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                清空
+              </button>
             </div>
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <svg
-                className="h-10 w-10 text-gray-400"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3"
-                />
-              </svg>
-              <span className="text-gray-700 font-medium">
-                拖拽文件到此处，或点击选择文件
-              </span>
-              <span className="text-sm text-gray-400">
-                PDF, DOCX, TXT, MD
-              </span>
+          </div>
+
+          {error && <ErrorState message={error} onRetry={handleImport} />}
+
+          {result && (
+            <div className="p-5 bg-green-50 border border-green-200 rounded-lg space-y-3">
+              <div className="flex items-center gap-2">
+                <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-green-700 font-semibold">文本导入成功</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="bg-green-100/60 rounded px-3 py-2">
+                  <span className="text-green-600">提取题目</span>
+                  <p className="text-green-800 font-semibold text-lg">{result.questions_extracted} 道</p>
+                </div>
+                <div className="bg-green-100/60 rounded px-3 py-2">
+                  <span className="text-green-600">知识节点</span>
+                  <p className="text-green-800 font-semibold text-lg">{result.knowledge_nodes} 个</p>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <Link
+                  href="/questions"
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                >
+                  查看题目列表 &rarr;
+                </Link>
+                <Link
+                  href="/study"
+                  className="px-4 py-2 border border-green-300 text-green-700 rounded-lg text-sm font-medium hover:bg-green-100 transition-colors"
+                >
+                  开始模拟面试
+                </Link>
+              </div>
             </div>
           )}
-        </div>
-      </div>
 
-      {uploadError && (
-        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-          {uploadError}
+          <EmptyState
+            title="提示"
+            description="你也可以从简历中自动提取针对性题目，切换到「简历导入」标签即可。"
+          />
         </div>
       )}
 
-      {uploadResult && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-green-700 font-medium">简历上传并解析成功！</p>
-              <dl className="mt-2 space-y-1 text-sm text-green-600">
+      {/* ── Tab: 简历导入 ──────────────────────────────────────── */}
+      {activeTab === "resume" && (
+        <div className="space-y-6">
+          {/* File upload zone */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">上传简历</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              支持 PDF、DOCX、TXT、MD 格式，上传后将自动解析并生成针对性面试题
+            </p>
+
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`
+                relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
+                transition-colors
+                ${
+                  dragActive
+                    ? "border-blue-500 bg-blue-50"
+                    : "border-gray-300 hover:border-gray-400 bg-gray-50"
+                }
+                ${uploading ? "pointer-events-none opacity-60" : ""}
+              `}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.md"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              {uploading ? (
+                <div className="flex flex-col items-center gap-3">
+                  <svg
+                    className="animate-spin h-8 w-8 text-blue-600"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  <div className="text-center">
+                    <TaskStatusBadge status="uploading" />
+                    <p className="text-gray-500 text-sm mt-1">文件上传中，请稍候...</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <svg
+                    className="h-10 w-10 text-gray-400"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3"
+                    />
+                  </svg>
+                  <span className="text-gray-700 font-medium">
+                    拖拽文件到此处，或点击选择文件
+                  </span>
+                  <span className="text-sm text-gray-400">PDF, DOCX, TXT, MD</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Upload result with parse summary */}
+          {uploadError && (
+            <ErrorState
+              title="简历解析失败"
+              message={uploadError}
+              onRetry={() => {
+                if (uploadResult?.resume_id) {
+                  handleReparse(uploadResult.resume_id);
+                }
+              }}
+            />
+          )}
+
+          {uploadResult && (
+            <div className="p-5 bg-green-50 border border-green-200 rounded-lg space-y-4">
+              <div className="flex items-center gap-2">
+                <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-green-700 font-semibold">简历上传并解析成功</p>
+              </div>
+
+              {/* Summary cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {uploadResult.structured_summary?.name && (
-                  <div className="flex gap-2">
-                    <span className="text-gray-500">姓名：</span>
-                    <span className="font-medium">{uploadResult.structured_summary.name}</span>
+                  <div className="bg-white/70 rounded-lg px-4 py-3">
+                    <span className="text-xs text-gray-500">姓名</span>
+                    <p className="font-semibold text-gray-900">{uploadResult.structured_summary.name}</p>
                   </div>
                 )}
                 {uploadResult.structured_summary?.title && (
-                  <div className="flex gap-2">
-                    <span className="text-gray-500">职位：</span>
-                    <span className="font-medium">{uploadResult.structured_summary.title}</span>
+                  <div className="bg-white/70 rounded-lg px-4 py-3">
+                    <span className="text-xs text-gray-500">目标职位</span>
+                    <p className="font-semibold text-gray-900">{uploadResult.structured_summary.title}</p>
                   </div>
                 )}
-                <div className="flex gap-2">
-                  <span className="text-gray-500">解析状态：</span>
-                  {parseStatusBadge(uploadResult.parse_status)}
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-gray-500">提取经历：</span>
-                  <span className="font-medium">{uploadResult.experiences_count} 条</span>
-                </div>
-                {uploadResult.structured_summary?.top_skills && uploadResult.structured_summary.top_skills.length > 0 && (
-                  <div className="flex gap-2">
-                    <span className="text-gray-500">核心技能：</span>
-                    <span className="font-medium">
-                      {uploadResult.structured_summary.top_skills.join("、")}
-                    </span>
+                {uploadResult.structured_summary?.years_of_experience != null && (
+                  <div className="bg-white/70 rounded-lg px-4 py-3">
+                    <span className="text-xs text-gray-500">工作年限</span>
+                    <p className="font-semibold text-gray-900">{uploadResult.structured_summary.years_of_experience} 年</p>
                   </div>
                 )}
-              </dl>
+                <div className="bg-white/70 rounded-lg px-4 py-3">
+                  <span className="text-xs text-gray-500">解析状态</span>
+                  <p className="mt-0.5"><TaskStatusBadge status={uploadResult.parse_status} /></p>
+                </div>
+              </div>
+
+              {/* Top skills */}
+              {uploadResult.structured_summary?.top_skills && uploadResult.structured_summary.top_skills.length > 0 && (
+                <div className="bg-white/70 rounded-lg px-4 py-3">
+                  <span className="text-xs text-gray-500">核心技能</span>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {uploadResult.structured_summary.top_skills.map((skill) => (
+                      <span
+                        key={skill}
+                        className="px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs font-medium"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Project experience summary */}
+              {uploadResult.structured_summary?.project_experience && uploadResult.structured_summary.project_experience.length > 0 && (
+                <div className="bg-white/70 rounded-lg px-4 py-3">
+                  <span className="text-xs text-gray-500">项目经历</span>
+                  <div className="mt-2 space-y-2">
+                    {uploadResult.structured_summary.project_experience.slice(0, 3).map((proj, i) => (
+                      <div key={i} className="border-l-2 border-indigo-200 pl-3 py-1">
+                        <p className="text-sm font-medium text-gray-800">
+                          {proj.project_name || "未命名项目"}
+                          {proj.role && (
+                            <span className="text-xs text-gray-500 font-normal ml-2">{proj.role}</span>
+                          )}
+                        </p>
+                        {proj.description && (
+                          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{proj.description}</p>
+                        )}
+                        {proj.technologies && proj.technologies.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {proj.technologies.slice(0, 5).map((tech) => (
+                              <span key={tech} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                                {tech}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Experiences count */}
+              <div className="bg-white/70 rounded-lg px-4 py-3">
+                <span className="text-xs text-gray-500">提取经历</span>
+                <p className="font-semibold text-gray-900">{uploadResult.experiences_count} 条</p>
+              </div>
+
+              {/* Next steps */}
+              <div className="flex flex-wrap gap-3 pt-1">
+                <Link
+                  href="/questions?source=resume"
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                >
+                  查看简历生成的题目 &rarr;
+                </Link>
+                <Link
+                  href="/study"
+                  className="px-4 py-2 border border-green-300 text-green-700 rounded-lg text-sm font-medium hover:bg-green-100 transition-colors"
+                >
+                  开始模拟面试
+                </Link>
+                <button
+                  onClick={() => handleReparse(uploadResult.resume_id)}
+                  disabled={uploading}
+                  className="px-4 py-2 border border-green-300 text-green-700 rounded-lg text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50"
+                >
+                  重新解析
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => triggerParse(uploadResult.resume_id)}
-              disabled={uploading}
-              className="shrink-0 ml-4 px-3 py-1.5 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors"
-            >
-              重新解析
-            </button>
+          )}
+
+          {/* Saved resumes list */}
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">已上传简历</h2>
+              <button
+                onClick={fetchResumes}
+                className="text-sm text-blue-600 hover:underline"
+              >
+                刷新
+              </button>
+            </div>
+
+            {listLoading ? (
+              <LoadingState variant="spinner" message="加载简历列表中..." />
+            ) : savedResumes.length === 0 ? (
+              <EmptyState
+                title="暂无简历"
+                description="上传你的第一份简历，AI 将自动解析并生成针对性面试题"
+              />
+            ) : (
+              <ul className="space-y-3">
+                {savedResumes.map((resume) => (
+                  <li
+                    key={resume.id}
+                    className="flex items-start justify-between gap-4 border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-900 truncate">
+                          {resume.file_name}
+                        </span>
+                        <TaskStatusBadge status={resume.parse_status} />
+                      </div>
+                      {resume.structured_summary && (
+                        <div className="mt-1.5 text-xs text-gray-500 space-y-0.5">
+                          {resume.structured_summary.title && (
+                            <span>{resume.structured_summary.title}</span>
+                          )}
+                          {resume.structured_summary.top_skills && resume.structured_summary.top_skills.length > 0 && (
+                            <span className="ml-2">
+                              · {resume.structured_summary.top_skills.slice(0, 4).join("、")}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {formatDate(resume.updated_at)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Link
+                        href={`/import/${resume.id}`}
+                        className="px-3 py-1 text-xs text-indigo-600 border border-indigo-300 rounded hover:bg-indigo-50 transition-colors"
+                      >
+                        查看详情
+                      </Link>
+                      <button
+                        onClick={() => handleReparse(resume.id)}
+                        disabled={uploading}
+                        className="px-3 py-1 text-xs text-blue-600 border border-blue-300 rounded hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                      >
+                        重新解析
+                      </button>
+                      <button
+                        onClick={() => handleDelete(resume.id)}
+                        className="px-3 py-1 text-xs text-red-600 border border-red-300 rounded hover:bg-red-50 transition-colors"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <Link
-            href="/study"
-            className="inline-block mt-3 text-sm text-blue-600 hover:underline"
-          >
-            开始模拟面试 &rarr;
-          </Link>
         </div>
       )}
-
-      {/* Saved resumes list */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">已上传简历</h2>
-          <button
-            onClick={fetchResumes}
-            className="text-sm text-blue-600 hover:underline"
-          >
-            刷新
-          </button>
-        </div>
-
-        {savedResumes.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center py-6">
-            暂无已上传的简历
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {savedResumes.map((resume) => (
-              <li
-                key={resume.id}
-                className="flex items-start justify-between gap-4 border-b border-gray-100 pb-3 last:border-0 last:pb-0"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900 truncate">
-                      {resume.file_name}
-                    </span>
-                    {parseStatusBadge(resume.parse_status)}
-                  </div>
-                  {resume.structured_summary && (
-                    <div className="mt-1 text-xs text-gray-500 space-y-0.5">
-                      {resume.structured_summary.title && (
-                        <span>{resume.structured_summary.title}</span>
-                      )}
-                      {resume.structured_summary.top_skills && (
-                        <span className="ml-2">
-                          {resume.structured_summary.top_skills.slice(0, 4).join("、")}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <p className="mt-0.5 text-xs text-gray-400">
-                    {formatDate(resume.updated_at)}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => handleReparse(resume.id)}
-                    disabled={uploading}
-                    className="px-3 py-1 text-xs text-blue-600 border border-blue-300 rounded hover:bg-blue-50 disabled:opacity-50 transition-colors"
-                  >
-                    重新解析
-                  </button>
-                  <button
-                    onClick={() => handleDelete(resume.id)}
-                    className="px-3 py-1 text-xs text-red-600 border border-red-300 rounded hover:bg-red-50 transition-colors"
-                  >
-                    删除
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
     </div>
   );
 }

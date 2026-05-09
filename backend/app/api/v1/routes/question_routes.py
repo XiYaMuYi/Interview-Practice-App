@@ -28,6 +28,7 @@ async def list_questions(
     domain_type: str | None = Query(None),
     question_type: str | None = Query(None),
     difficulty_level: int | None = Query(None, ge=1, le=5),
+    source_type: str | None = Query(None, description="Filter by source: resume/file/text/manual/ai"),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ):
@@ -38,6 +39,7 @@ async def list_questions(
         domain_type=domain_type,
         question_type=question_type,
         difficulty_level=difficulty_level,
+        source_type=source_type,
         offset=offset,
         limit=limit,
     )
@@ -52,6 +54,7 @@ async def list_questions(
                 "question_type": q.question_type,
                 "domain_type": q.domain_type,
                 "difficulty_level": q.difficulty_level,
+                "source_type": q.source_type,
             }
             for q in questions
         ],

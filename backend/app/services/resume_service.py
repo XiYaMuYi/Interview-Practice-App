@@ -148,3 +148,14 @@ class ResumeService:
 
     async def delete_resume(self, resume_id: UUID) -> bool:
         return await self.resume_repo.soft_delete(resume_id)
+
+    async def list_experiences(self, resume_id: UUID) -> list[ResumeExperience]:
+        """List all experiences for a given resume."""
+        resume = await self.resume_repo.get_by_id(resume_id)
+        if resume is None or resume.deleted_at is not None:
+            raise NotFoundError("Resume", str(resume_id))
+        results = await self.experience_repo.list(
+            filters={"resume_id": resume_id},
+            order_by="created_at",
+        )
+        return list(results)

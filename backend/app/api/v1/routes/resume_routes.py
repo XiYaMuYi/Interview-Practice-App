@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from app.api.deps import DbSession
 from app.core.exceptions import ParseError
 from app.domain.schemas.resume_schemas import (
+    ResumeExperienceRead,
     ResumeParseResponse,
     ResumeRead,
     ResumeUpdate,
@@ -105,3 +106,14 @@ async def delete_resume(
     service = ResumeService(session)
     deleted = await service.delete_resume(resume_id)
     return {"status": "success", "deleted": deleted}
+
+
+@router.get("/{resume_id}/experiences", response_model=list["ResumeExperienceRead"])
+async def list_resume_experiences(
+    resume_id: UUID,
+    session: DbSession,
+):
+    """List all parsed experiences for a resume."""
+    from app.services.resume_service import ResumeService
+    service = ResumeService(session)
+    return await service.list_experiences(resume_id)

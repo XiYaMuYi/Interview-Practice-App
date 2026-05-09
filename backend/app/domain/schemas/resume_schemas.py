@@ -65,7 +65,8 @@ class ResumeRead(BaseModel):
     extra_data: dict | None = None
     created_at: datetime
     updated_at: datetime
-    experiences: list[ResumeExperienceRead] = []
+    # Note: experiences omitted here to avoid lazy-load MissingGreenlet errors.
+    # Use GET /{resume_id}/experiences to fetch them separately.
 
     model_config = {"from_attributes": True}
 

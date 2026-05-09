@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SourceBadge from "./SourceBadge";
 
 interface Question {
   id: string;
@@ -6,6 +7,7 @@ interface Question {
   question_type: string | null;
   domain_type: string | null;
   difficulty_level: number | null;
+  source_type?: string;
 }
 
 interface QuestionCardProps {
@@ -74,7 +76,10 @@ export default function QuestionCard({ question }: QuestionCardProps) {
             {question.title || "无标题"}
           </h2>
         </div>
-        <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+        <div className="flex gap-2 shrink-0 flex-wrap justify-end items-center">
+          {question.source_type && (
+            <SourceBadge source={question.source_type} />
+          )}
           <span className="px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700">
             {typeLabel(question.question_type)}
           </span>

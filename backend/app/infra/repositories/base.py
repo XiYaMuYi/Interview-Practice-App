@@ -133,6 +133,7 @@ class QuestionRepository(BaseRepository["Question"]):
         domain_type: str | None = None,
         question_type: str | None = None,
         difficulty_level: int | None = None,
+        source_type: str | None = None,
         offset: int = 0,
         limit: int = 50,
     ) -> Sequence[Question]:
@@ -152,6 +153,8 @@ class QuestionRepository(BaseRepository["Question"]):
             stmt = stmt.where(self.model.question_type == question_type)
         if difficulty_level is not None:
             stmt = stmt.where(self.model.difficulty_level == difficulty_level)
+        if source_type:
+            stmt = stmt.where(self.model.source_type == source_type)
         stmt = stmt.offset(offset).limit(limit).order_by(self.model.created_at.desc())
         result = await self.session.exec(stmt)
         rows = result.all()

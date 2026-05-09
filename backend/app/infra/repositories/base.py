@@ -208,7 +208,7 @@ class QuestionRepository(BaseRepository["Question"]):
 
         # Count query
         count_stmt = select(func.count()).select_from(self.model).where(*conditions)
-        total = (await self.session.exec(count_stmt)).one()
+        total = (await self.session.exec(count_stmt)).scalar_one()
 
         # Data query
         data_stmt = select(self.model).where(*conditions)
@@ -272,7 +272,7 @@ class StudyRecordRepository(BaseRepository["StudyRecord"]):
                 count_stmt = count_stmt.where(getattr(self.model, key) == value)
                 data_stmt = data_stmt.where(getattr(self.model, key) == value)
 
-        total = (await self.session.exec(count_stmt)).one()
+        total = (await self.session.exec(count_stmt)).scalar_one()
         data_stmt = data_stmt.offset(offset).limit(limit).order_by(self.model.created_at.desc())
         result = await self.session.exec(data_stmt)
         return result.all(), total

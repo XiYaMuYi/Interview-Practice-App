@@ -8,3 +8,5 @@ dist/
 build/
 .next/
 *.egg-info/
+uploads/
+test_resume.txt

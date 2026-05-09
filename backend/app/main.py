@@ -12,6 +12,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
         debug=settings.DEBUG,
+        redirect_slashes=False,
     )
 
     # Register routes — import routers to trigger side-effect of router registration

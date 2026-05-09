@@ -8,6 +8,7 @@ from app.api.v1.routes import (
     chat_routes,
     import_routes,
     question_routes,
+    resume_routes,
     study_routes,
 )
 
@@ -21,5 +22,6 @@ def register_routes(app: FastAPI) -> None:
     v1_router.include_router(study_routes.router, prefix="/study", tags=["study"])
     v1_router.include_router(chat_routes.router, prefix="/chat", tags=["chat"])
     v1_router.include_router(ai_routes.router, prefix="/ai", tags=["ai"])
+    v1_router.include_router(resume_routes.router, prefix="/resumes", tags=["resumes"])
 
     app.include_router(v1_router)

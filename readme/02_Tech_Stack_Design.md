@@ -15,10 +15,16 @@
 
 本项目采用 **模块化单体** 路线，MVP 阶段不做微服务化拆分，但必须在工程上预留扩展点。
 
+### 1.2 新增核心能力：简历驱动面试题生成
+
+MVP 必须支持上传简历后自动解析技术栈、项目经历与职责描述，并基于这些结构化结果生成“只围绕你本人简历内容”的面试题，而不是凭空出题。该能力必须与题库、标签、知识节点、学习记录、LangGraph 工作流复用同一套底座。
+
 ### 1.2 关键决策
 
 - **后端**：Python + FastAPI + LangGraph
+- **简历解析**：PyMuPDF / python-docx / PaddleOCR / 结构化抽取模型
 - **主模型供应商**：阿里云 DashScope 兼容 Claude API 风格的接入方式
+- **简历出题策略**：基于简历解析结果做技术栈映射、项目追问与知识节点召回
 - **Embedding**：本地 `D:\AI_Project\models\bge-small-zh-v1.5`
 - **Reranker**：本地 `D:\AI_Project\models\bge-reranker-v2-m3`
 - **数据库**：PostgreSQL + pgvector
@@ -193,6 +199,7 @@ flowchart LR
 
     API --> AUTH[认证与权限层\n默认隐藏，配置开关控制]
     API --> FILE[文件上传与解析服务]
+    API --> RESUME[简历导入与解析服务]
     API --> QRY[题目管理服务]
     API --> CHAT[对话与智能体服务]
     API --> STAT[统计与报告服务]
@@ -201,6 +208,9 @@ flowchart LR
     FILE --> DOC[python-docx]
     FILE --> IMG[PaddleOCR / Pillow]
     FILE --> WEB[Playwright / BeautifulSoup]
+    RESUME --> PDF
+    RESUME --> DOC
+    RESUME --> IMG
 
     QRY --> LLM[LLM Gateway / DashScope Claude-compatible]
     CHAT --> GRAPH[LangGraph 工作流]

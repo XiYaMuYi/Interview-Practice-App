@@ -60,7 +60,7 @@ export default function HomePage() {
       try {
         const [statsRes, questionsRes] = await Promise.allSettled([
           axios.get<StudyStats>("/api/v1/study/stats"),
-          axios.get<ListResponse>("/api/v1/questions/", { params: { offset: 0, limit: 3 } }),
+          axios.get<ListResponse>("/api/v1/questions", { params: { offset: 0, limit: 3 } }),
         ]);
 
         if (statsRes.status === "fulfilled") setStats(statsRes.value.data);

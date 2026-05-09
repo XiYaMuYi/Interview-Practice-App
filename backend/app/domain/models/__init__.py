@@ -263,6 +263,49 @@ class LearningProfile(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+# ── Resumes ──
+
+class Resume(SQLModel, table=True):
+    __tablename__ = "resumes"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    file_id: uuid.UUID | None = Field(default=None, foreign_key="files.id")
+    file_name: str = Field(max_length=255)
+    file_path: str = Field(max_length=500)
+    source_type: str = Field(max_length=50)
+    parse_status: str = Field(max_length=50)
+    raw_text: str | None = None
+    structured_summary: dict | None = Field(default=None, sa_column=_jsonb_column())
+    model_version: str | None = Field(default=None, max_length=100)
+    prompt_version: str | None = Field(default=None, max_length=100)
+    extra_data: dict | None = Field(default=None, sa_column=_jsonb_column())
+    deleted_at: datetime | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    experiences: list["ResumeExperience"] = Relationship(back_populates="resume")
+
+
+class ResumeExperience(SQLModel, table=True):
+    __tablename__ = "resume_experiences"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    resume_id: uuid.UUID = Field(foreign_key="resumes.id")
+    experience_type: str = Field(max_length=50)
+    company_or_project: str | None = Field(default=None, max_length=255)
+    role_title: str | None = Field(default=None, max_length=255)
+    start_date: str | None = Field(default=None, max_length=20)
+    end_date: str | None = Field(default=None, max_length=20)
+    description: str | None = None
+    tech_stack: dict | None = Field(default=None, sa_column=_jsonb_column())
+    extracted_keywords: dict | None = Field(default=None, sa_column=_jsonb_column())
+    confidence: float | None = None
+    extra_data: dict | None = Field(default=None, sa_column=_jsonb_column())
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    resume: "Resume" = Relationship(back_populates="experiences")
+
+
 # ── Expose metadata for Alembic ──
 
 Base = SQLModel.metadata

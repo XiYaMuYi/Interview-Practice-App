@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import axios from "axios";
+
+// ── Types ────────────────────────────────────────────────────────────
 
 interface ImportResult {
   status: string;
@@ -11,14 +13,34 @@ interface ImportResult {
   question_ids: string[];
 }
 
-interface FileUploadResult {
-  status: string;
-  file_id: string;
+interface StructuredSummary {
+  name?: string;
+  title?: string;
+  years_of_experience?: number;
+  top_skills?: string[];
+  summary?: string;
+  [key: string]: unknown;
+}
+
+interface ResumeRead {
+  id: string;
   file_name: string;
+  file_path: string;
+  source_type: string;
   parse_status: string;
-  questions_extracted: number;
-  knowledge_nodes: number;
-  question_ids: string[];
+  raw_text: string | null;
+  structured_summary: StructuredSummary | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ResumeParseResponse {
+  resume_id: string;
+  parse_status: string;
+  structured_summary: StructuredSummary | null;
+  experiences_count: number;
+  model_version: string | null;
+  prompt_version: string | null;
 }
 
 const ALLOWED_TYPES = [
@@ -36,6 +58,16 @@ function isAllowedFile(file: File) {
   return ALLOWED_EXTENSIONS.includes(ext);
 }
 
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function ImportPage() {
   // Text import state
   const [text, setText] = useState("");
@@ -47,8 +79,28 @@ export default function ImportPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<FileUploadResult | null>(null);
+  const [uploadResult, setUploadResult] = useState<ResumeParseResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Saved resumes list state
+  const [savedResumes, setSavedResumes] = useState<ResumeRead[]>([]);
+
+  // ── Resume list ──────────────────────────────────────────────────
+
+  const fetchResumes = useCallback(async () => {
+    try {
+      const res = await axios.get<ResumeRead[]>("/api/v1/resumes");
+      setSavedResumes(res.data);
+    } catch {
+      // silently ignore — list is optional
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchResumes();
+  }, [fetchResumes]);
+
+  // ── Text import ──────────────────────────────────────────────────
 
   const handleImport = async () => {
     if (!text.trim()) return;
@@ -69,29 +121,54 @@ export default function ImportPage() {
     }
   };
 
-  const processFile = useCallback(async (file: File) => {
-    if (!isAllowedFile(file)) {
-      setUploadError("不支持的文件类型，请上传 PDF、DOCX、TXT 或 MD 文件");
-      return;
-    }
+  // ── File upload helpers ──────────────────────────────────────────
 
-    setUploading(true);
-    setUploadError(null);
-    setUploadResult(null);
-
+  const triggerParse = useCallback(async (resumeId: string) => {
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await axios.post("/api/v1/files/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await axios.post<ResumeParseResponse>(
+        `/api/v1/resumes/${resumeId}/parse`
+      );
       setUploadResult(res.data);
     } catch {
-      setUploadError("文件上传失败，请检查网络连接或后端服务状态");
-    } finally {
-      setUploading(false);
+      setUploadError("简历解析失败，请检查后端服务状态");
     }
   }, []);
+
+  const processFile = useCallback(
+    async (file: File) => {
+      if (!isAllowedFile(file)) {
+        setUploadError("不支持的文件类型，请上传 PDF、DOCX、TXT 或 MD 文件");
+        return;
+      }
+
+      setUploading(true);
+      setUploadError(null);
+      setUploadResult(null);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await axios.post<ResumeRead>("/api/v1/resumes/upload", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+
+        const resumeId = res.data.id;
+        await triggerParse(resumeId);
+        await fetchResumes();
+      } catch (e: unknown) {
+        if (axios.isAxiosError(e)) {
+          setUploadError(
+            e.response?.data?.detail ?? "文件上传失败，请检查网络连接或后端服务状态"
+          );
+        } else {
+          setUploadError("文件上传失败，请检查网络连接或后端服务状态");
+        }
+      } finally {
+        setUploading(false);
+      }
+    },
+    [triggerParse, fetchResumes]
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -120,11 +197,60 @@ export default function ImportPage() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) processFile(file);
-      // Reset input so the same file can be re-selected
       e.target.value = "";
     },
     [processFile]
   );
+
+  // ── Resume actions ───────────────────────────────────────────────
+
+  const handleDelete = useCallback(
+    async (resumeId: string) => {
+      if (!confirm("确定要删除这份简历吗？此操作不可撤销。")) return;
+      try {
+        await axios.delete(`/api/v1/resumes/${resumeId}`);
+        setSavedResumes((prev) => prev.filter((r) => r.id !== resumeId));
+        if (uploadResult?.resume_id === resumeId) {
+          setUploadResult(null);
+        }
+      } catch {
+        setUploadError("删除失败，请重试");
+      }
+    },
+    [uploadResult]
+  );
+
+  const handleReparse = useCallback(
+    async (resumeId: string) => {
+      setUploading(true);
+      setUploadError(null);
+      try {
+        await triggerParse(resumeId);
+        await fetchResumes();
+      } finally {
+        setUploading(false);
+      }
+    },
+    [triggerParse, fetchResumes]
+  );
+
+  // ── Render helpers ───────────────────────────────────────────────
+
+  const parseStatusBadge = (status: string) => {
+    const map: Record<string, { label: string; cls: string }> = {
+      parsed: { label: "已解析", cls: "bg-green-100 text-green-700" },
+      pending: { label: "待解析", cls: "bg-yellow-100 text-yellow-700" },
+      processing: { label: "解析中", cls: "bg-blue-100 text-blue-700" },
+      failed: { label: "解析失败", cls: "bg-red-100 text-red-700" },
+    };
+    const { label, cls } = map[status] ?? {
+      label: status,
+      cls: "bg-gray-100 text-gray-600",
+    };
+    return <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium ${cls}`}>{label}</span>;
+  };
+
+  // ── Render ───────────────────────────────────────────────────────
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -190,8 +316,8 @@ export default function ImportPage() {
       )}
 
       {/* File upload */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">文件上传</h2>
+      <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">上传简历</h2>
         <p className="text-sm text-gray-500 mb-4">
           支持 PDF、DOCX、TXT、MD 格式
         </p>
@@ -271,48 +397,130 @@ export default function ImportPage() {
       </div>
 
       {uploadError && (
-        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
           {uploadError}
         </div>
       )}
 
       {uploadResult && (
-        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-green-700 font-medium">文件上传成功！</p>
-          <dl className="mt-2 space-y-1 text-sm text-green-600">
-            <div className="flex gap-2">
-              <span className="text-gray-500">文件名：</span>
-              <span className="font-medium">{uploadResult.file_name}</span>
+        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-green-700 font-medium">简历上传并解析成功！</p>
+              <dl className="mt-2 space-y-1 text-sm text-green-600">
+                {uploadResult.structured_summary?.name && (
+                  <div className="flex gap-2">
+                    <span className="text-gray-500">姓名：</span>
+                    <span className="font-medium">{uploadResult.structured_summary.name}</span>
+                  </div>
+                )}
+                {uploadResult.structured_summary?.title && (
+                  <div className="flex gap-2">
+                    <span className="text-gray-500">职位：</span>
+                    <span className="font-medium">{uploadResult.structured_summary.title}</span>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <span className="text-gray-500">解析状态：</span>
+                  {parseStatusBadge(uploadResult.parse_status)}
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-gray-500">提取经历：</span>
+                  <span className="font-medium">{uploadResult.experiences_count} 条</span>
+                </div>
+                {uploadResult.structured_summary?.top_skills && uploadResult.structured_summary.top_skills.length > 0 && (
+                  <div className="flex gap-2">
+                    <span className="text-gray-500">核心技能：</span>
+                    <span className="font-medium">
+                      {uploadResult.structured_summary.top_skills.join("、")}
+                    </span>
+                  </div>
+                )}
+              </dl>
             </div>
-            <div className="flex gap-2">
-              <span className="text-gray-500">解析状态：</span>
-              <span
-                className={`font-medium ${
-                  uploadResult.parse_status === "success"
-                    ? "text-green-700"
-                    : "text-yellow-700"
-                }`}
-              >
-                {uploadResult.parse_status === "success" ? "解析成功" : uploadResult.parse_status}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-gray-500">提取题目：</span>
-              <span className="font-medium">{uploadResult.questions_extracted} 道</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-gray-500">知识节点：</span>
-              <span className="font-medium">{uploadResult.knowledge_nodes} 个</span>
-            </div>
-          </dl>
+            <button
+              onClick={() => triggerParse(uploadResult.resume_id)}
+              disabled={uploading}
+              className="shrink-0 ml-4 px-3 py-1.5 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors"
+            >
+              重新解析
+            </button>
+          </div>
           <Link
-            href="/questions"
+            href="/study"
             className="inline-block mt-3 text-sm text-blue-600 hover:underline"
           >
-            查看题目列表 &rarr;
+            开始模拟面试 &rarr;
           </Link>
         </div>
       )}
+
+      {/* Saved resumes list */}
+      <div className="bg-white rounded-lg shadow-sm border p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">已上传简历</h2>
+          <button
+            onClick={fetchResumes}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            刷新
+          </button>
+        </div>
+
+        {savedResumes.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-6">
+            暂无已上传的简历
+          </p>
+        ) : (
+          <ul className="space-y-3">
+            {savedResumes.map((resume) => (
+              <li
+                key={resume.id}
+                className="flex items-start justify-between gap-4 border-b border-gray-100 pb-3 last:border-0 last:pb-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-900 truncate">
+                      {resume.file_name}
+                    </span>
+                    {parseStatusBadge(resume.parse_status)}
+                  </div>
+                  {resume.structured_summary && (
+                    <div className="mt-1 text-xs text-gray-500 space-y-0.5">
+                      {resume.structured_summary.title && (
+                        <span>{resume.structured_summary.title}</span>
+                      )}
+                      {resume.structured_summary.top_skills && (
+                        <span className="ml-2">
+                          {resume.structured_summary.top_skills.slice(0, 4).join("、")}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <p className="mt-0.5 text-xs text-gray-400">
+                    {formatDate(resume.updated_at)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => handleReparse(resume.id)}
+                    disabled={uploading}
+                    className="px-3 py-1 text-xs text-blue-600 border border-blue-300 rounded hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                  >
+                    重新解析
+                  </button>
+                  <button
+                    onClick={() => handleDelete(resume.id)}
+                    className="px-3 py-1 text-xs text-red-600 border border-red-300 rounded hover:bg-red-50 transition-colors"
+                  >
+                    删除
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

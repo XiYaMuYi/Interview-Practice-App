@@ -42,6 +42,8 @@
 - `Knowledge_Nodes`：知识点与依赖关系，支撑知识图谱和学习路径
 - `Question_Embeddings`：题目向量，用于语义检索与相似题召回
 - `Question_Knowledge_Nodes`：题目与知识节点的多对多关系
+- `Resumes`：简历原始文件与解析结果
+- `Resume_Experiences`：简历中的项目经历、技术栈、职责拆解
 - `Prompt_Versions`：prompt 模板版本与模型配置记录，支撑 AI 可追溯性
 - `Learning_Profiles`：用户学习画像与掌握程度缓存，后续多用户扩展时使用
 
@@ -150,7 +152,45 @@
 | metadata | JSONB | 否 | 扩展字段 |
 | created_at | TIMESTAMP | 是 | 创建时间 |
 
-### 4.5 Study_Records 学习记录表
+### 4.5 Resumes 简历表
+
+| 字段名 | 数据类型 | 是否必填 | 说明 |
+|---|---:|---:|---|
+| id | UUID / BIGSERIAL | 是 | 主键 |
+| user_id | UUID / VARCHAR(255) | 否 | 用户标识，预留多用户能力 |
+| file_id | UUID / BIGINT | 是 | 关联上传文件 |
+| file_name | VARCHAR(255) | 是 | 简历文件名 |
+| file_path | VARCHAR(500) | 是 | 文件存储路径 |
+| source_type | VARCHAR(50) | 是 | upload/paste/manual |
+| parse_status | VARCHAR(50) | 是 | pending/processing/success/failed |
+| raw_text | TEXT | 否 | 简历解析后的原始文本 |
+| structured_summary | JSONB | 否 | 结构化简历摘要 |
+| metadata | JSONB | 否 | 扩展字段 |
+| version | INT | 是 | 简历版本 |
+| model_version | VARCHAR(100) | 否 | 解析模型版本 |
+| prompt_version | VARCHAR(100) | 否 | 解析 prompt 版本 |
+| created_at | TIMESTAMP | 是 | 创建时间 |
+| updated_at | TIMESTAMP | 是 | 更新时间 |
+
+### 4.6 Resume_Experiences 简历经历表
+
+| 字段名 | 数据类型 | 是否必填 | 说明 |
+|---|---:|---:|---|
+| id | UUID / BIGSERIAL | 是 | 主键 |
+| resume_id | UUID / BIGINT | 是 | 关联简历 |
+| experience_type | VARCHAR(50) | 是 | work/project/education/skill |
+| company_or_project | VARCHAR(255) | 否 | 公司名或项目名 |
+| role_title | VARCHAR(255) | 否 | 职位或角色 |
+| start_date | DATE | 否 | 开始时间 |
+| end_date | DATE | 否 | 结束时间 |
+| description | TEXT | 否 | 经历描述 |
+| tech_stack | JSONB | 否 | 技术栈列表 |
+| extracted_keywords | JSONB | 否 | 抽取关键词 |
+| confidence | NUMERIC(5,2) | 否 | 解析置信度 |
+| metadata | JSONB | 否 | 扩展字段 |
+| created_at | TIMESTAMP | 是 | 创建时间 |
+
+### 4.7 Study_Records 学习记录表
 
 | 字段名 | 数据类型 | 是否必填 | 说明 |
 |---|---:|---:|---|
@@ -331,6 +371,40 @@ erDiagram
         datetime created_at
     }
 
+    RESUMES {
+        uuid id PK
+        string user_id
+        uuid file_id FK
+        string file_name
+        string file_path
+        string source_type
+        string parse_status
+        text raw_text
+        jsonb structured_summary
+        jsonb metadata
+        int version
+        string model_version
+        string prompt_version
+        datetime created_at
+        datetime updated_at
+    }
+
+    RESUME_EXPERIENCES {
+        uuid id PK
+        uuid resume_id FK
+        string experience_type
+        string company_or_project
+        string role_title
+        date start_date
+        date end_date
+        text description
+        jsonb tech_stack
+        jsonb extracted_keywords
+        decimal confidence
+        jsonb metadata
+        datetime created_at
+    }
+
     STUDY_RECORDS {
         uuid id PK
         string user_id
@@ -432,6 +506,9 @@ erDiagram
 
     QUESTIONS ||--o{ QUESTION_TAGS : has
     TAGS ||--o{ QUESTION_TAGS : maps
+    RESUMES ||--o{ RESUME_EXPERIENCES : contains
+    RESUMES ||--o{ QUESTIONS : generates
+    RESUME_EXPERIENCES ||--o{ QUESTIONS : inspires
     QUESTIONS ||--o{ QUESTION_KNOWLEDGE_NODES : relates
     KNOWLEDGE_NODES ||--o{ QUESTION_KNOWLEDGE_NODES : maps
     QUESTIONS ||--o{ STUDY_RECORDS : studied_in
@@ -478,8 +555,10 @@ erDiagram
 ### 7.1 数据处理主链路
 
 1. 原始文件先入 `Files`
-2. 文件解析后生成候选文本块
-3. 文本块经抽取与分类后写入 `Questions`
+2. 简历文件同步写入 `Resumes`
+3. 文件解析后生成候选文本块与 `Resume_Experiences`
+4. 基于 `Resume_Experiences` 和技术栈映射生成面试题
+5. 文本块经抽取与分类后写入 `Questions`
 4. AI 自动生成 `Tags` 与 `Question_Tags`
 5. 自动建立 `Question_Knowledge_Nodes`
 6. 向量化后存入 `Question_Embeddings`

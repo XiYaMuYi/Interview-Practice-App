@@ -20,6 +20,7 @@ async def extract_questions(session: DbSession, text: str, source_type: str = Qu
     return result
 
 
+@router.get("")
 @router.get("/")
 async def list_questions(
     session: DbSession,
@@ -104,6 +105,7 @@ async def get_question(session: DbSession, question_id: UUID):
     }
 
 
+@router.post("")
 @router.post("/")
 async def create_question(session: DbSession, data: dict):
     """Create a new question manually."""

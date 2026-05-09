@@ -47,7 +47,7 @@ export default function QuestionsPage() {
         if (domainFilter) params.domain_type = domainFilter;
         if (difficultyFilter) params.difficulty_level = parseInt(difficultyFilter, 10);
 
-        const res = await axios.get<ListResponse>("/api/v1/questions/", { params });
+        const res = await axios.get<ListResponse>("/api/v1/questions", { params });
         setQuestions(res.data.items);
         setTotal(res.data.total);
       }

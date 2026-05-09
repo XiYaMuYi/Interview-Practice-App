@@ -175,6 +175,48 @@ class PromptRegistry:
             )
         )
 
+        self.register(
+            PromptTemplate(
+                key="resume_parsing",
+                version="1.0",
+                description="Parse a resume and extract structured information",
+                system_template="""你是一个简历解析专家。请从以下简历文本中提取结构化信息。
+
+请输出以下 JSON 格式：
+{
+  "summary": {
+    "name": "姓名（如无法识别则为null）",
+    "title": "职位/头衔",
+    "years_of_experience": 工作经验年数（整数，无法判断则为null）,
+    "top_skills": ["核心技能1", "核心技能2", ...],
+    "summary": "一段话总结该候选人的背景"
+  },
+  "experiences": [
+    {
+      "experience_type": "work 或 project 或 education",
+      "company_or_project": "公司名或项目名",
+      "role_title": "职位/角色",
+      "start_date": "开始日期（如 2023-01）",
+      "end_date": "结束日期（如 2024-06，至今则为null）",
+      "description": "职责/项目描述",
+      "tech_stack": {"languages": [...], "frameworks": [...], "tools": [...], "databases": [...]},
+      "extracted_keywords": ["关键词1", "关键词2", ...],
+      "confidence": 0.0-1.0 的置信度
+    }
+  ]
+}
+
+要求：
+1. 工作经历和项目经历分开，experience_type 区分 work/project/education
+2. 技术栈尽量提取，分类到 languages/frameworks/tools/databases
+3. 如果没有某项信息则填 null，不要编造
+4. experiences 按时间倒序排列
+
+简历文本：
+{{{resume_text}}}""",
+            )
+        )
+
 
 # ── Singleton ──────────────────────────────────────────────────────
 

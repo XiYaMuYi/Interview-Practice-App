@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import axios from "axios";
+import EmptyState from "@/components/EmptyState";
+import LoadingState from "@/components/LoadingState";
+import TaskStatusBadge from "@/components/TaskStatusBadge";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -24,7 +27,23 @@ interface AnswerResponse {
   total_turns: number;
 }
 
+interface StructuredSummary {
+  name?: string;
+  title?: string;
+  years_of_experience?: number;
+  top_skills?: string[];
+  summary?: string;
+}
+
+interface ResumeItem {
+  id: string;
+  file_name: string;
+  parse_status: string;
+  structured_summary: StructuredSummary | null;
+}
+
 type Phase = "setup" | "interview" | "done";
+type InterviewMode = "general" | "resume";
 
 const domains = ["RAG", "Backend", "Frontend", "Database", "DevOps", "Algorithm", "ML"];
 const difficulties = [
@@ -36,9 +55,18 @@ const difficulties = [
 // ─── Page ────────────────────────────────────────────────────────────
 
 export default function InterviewPage() {
+  // Mode
+  const [mode, setMode] = useState<InterviewMode>("general");
+
   // Setup
   const [selectedDomain, setSelectedDomain] = useState("");
   const [selectedDifficulty, setSelectedDifficulty] = useState("medium");
+
+  // Resume mode
+  const [resumes, setResumes] = useState<ResumeItem[]>([]);
+  const [selectedResumeId, setSelectedResumeId] = useState<string | null>(null);
+  const [loadingResumes, setLoadingResumes] = useState(false);
+  const [selectedResumeName, setSelectedResumeName] = useState("");
 
   // Interview
   const [phase, setPhase] = useState<Phase>("setup");
@@ -56,6 +84,26 @@ export default function InterviewPage() {
 
   const answerRef = useRef<HTMLTextAreaElement>(null);
 
+  const [resumesLoaded, setResumesLoaded] = useState(false);
+
+  // Load resumes when switching to resume mode
+  useEffect(() => {
+    if (mode !== "resume" || resumesLoaded) return;
+    const loadResumes = async () => {
+      setLoadingResumes(true);
+      try {
+        const res = await axios.get("/api/v1/resumes", { params: { limit: 20 } });
+        setResumes(res.data);
+        setResumesLoaded(true);
+      } catch {
+        // silently ignore — EmptyState will handle it
+      } finally {
+        setLoadingResumes(false);
+      }
+    };
+    loadResumes();
+  }, [mode, resumesLoaded]);
+
   // ── Start Interview ────────────────────────────────────────────────
 
   const startInterview = async () => {
@@ -63,10 +111,14 @@ export default function InterviewPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await axios.post<InterviewStartResponse>("/api/v1/ai/interview/start", {
+      const body: Record<string, string> = {
         domain: selectedDomain,
         difficulty: selectedDifficulty,
-      });
+      };
+      if (mode === "resume" && selectedResumeId) {
+        body.resume_id = selectedResumeId;
+      }
+      const res = await axios.post<InterviewStartResponse>("/api/v1/ai/interview/start", body);
       setSessionId(res.data.session_id);
       setCurrentQuestion(res.data.first_question);
       setTurns([]);
@@ -130,6 +182,13 @@ export default function InterviewPage() {
     setOverallScore(null);
     setTotalTurns(0);
     setError(null);
+    setSelectedResumeId(null);
+    setSelectedResumeName("");
+  };
+
+  const switchMode = (newMode: InterviewMode) => {
+    setMode(newMode);
+    if (phase !== "setup") resetInterview();
   };
 
   // ── Score helpers ──────────────────────────────────────────────────
@@ -146,6 +205,17 @@ export default function InterviewPage() {
     return "bg-red-500";
   }
 
+  // ── Resume mode badge ──────────────────────────────────────────────
+
+  const resumeBadge = mode === "resume" && phase !== "setup" && (
+    <div className="mb-4">
+      <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-rose-100 text-rose-700 border border-rose-200">
+        <span className="w-2 h-2 rounded-full bg-rose-500" />
+        简历模式：{selectedResumeName}
+      </span>
+    </div>
+  );
+
   // ── Render: Setup ──────────────────────────────────────────────────
 
   if (phase === "setup") {
@@ -155,6 +225,83 @@ export default function InterviewPage() {
         <p className="text-gray-600 mb-8">选择领域和难度，开始沉浸式 AI 面试体验</p>
 
         <div className="bg-white rounded-xl shadow-sm border p-8 space-y-6">
+          {/* Mode selector */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">面试模式</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => switchMode("general")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  mode === "general"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                通用模式
+              </button>
+              <button
+                onClick={() => switchMode("resume")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  mode === "resume"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                简历模式
+              </button>
+            </div>
+          </div>
+
+          {/* Resume selection */}
+          {mode === "resume" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">选择简历</label>
+              {loadingResumes ? (
+                <LoadingState variant="spinner" message="加载简历中..." />
+              ) : resumes.length === 0 ? (
+                <EmptyState
+                  title="暂无简历"
+                  description="请先上传简历，才能使用简历模式进行面试"
+                  actionLabel="去导入简历"
+                  actionHref="/import"
+                />
+              ) : (
+                <ul className="space-y-2 max-h-64 overflow-y-auto">
+                  {resumes.map((r) => (
+                    <li
+                      key={r.id}
+                      onClick={() => {
+                        setSelectedResumeId(r.id);
+                        setSelectedResumeName(r.file_name);
+                      }}
+                      className={`flex items-center justify-between gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                        selectedResumeId === r.id
+                          ? "border-blue-400 bg-blue-50"
+                          : "border-gray-200 hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-900 truncate">{r.file_name}</p>
+                        {r.structured_summary?.top_skills && r.structured_summary.top_skills.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {r.structured_summary.top_skills.slice(0, 4).map((s) => (
+                              <span key={s} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-xs">
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="shrink-0">
+                        <TaskStatusBadge status={r.parse_status} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {/* Domain */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">面试领域</label>
@@ -201,7 +348,7 @@ export default function InterviewPage() {
 
           <button
             onClick={startInterview}
-            disabled={loading || !selectedDomain}
+            disabled={loading || !selectedDomain || (mode === "resume" && !selectedResumeId)}
             className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-lg"
           >
             {loading ? "准备中..." : "开始面试"}
@@ -216,11 +363,14 @@ export default function InterviewPage() {
   if (phase === "interview") {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {resumeBadge}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">模拟面试</h1>
             <p className="text-sm text-gray-500 mt-1">
+              {mode === "resume" && <span>简历模式 · </span>}
               领域: <span className="font-medium text-gray-700">{selectedDomain}</span>
               {" · "}难度: <span className="font-medium text-gray-700">{selectedDifficulty}</span>
               {" · "}第 {turns.length + 1} 轮
@@ -288,6 +438,8 @@ export default function InterviewPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      {resumeBadge}
+
       <div className="text-center mb-8">
         <div className="text-5xl mb-4">&#127881;</div>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">面试结束</h1>

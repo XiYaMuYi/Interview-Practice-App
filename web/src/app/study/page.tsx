@@ -2,6 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
+import EmptyState from "@/components/EmptyState";
+import Pagination from "@/components/Pagination";
+import SourceBadge from "@/components/SourceBadge";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -12,6 +15,7 @@ interface QuestionListItem {
   domain_type: string | null;
   difficulty_level: number | null;
   mastery_level: number | null;
+  source_type?: string | null;
 }
 
 interface QuestionDetail {
@@ -142,16 +146,25 @@ function MarkdownContent({ text }: { text: string }) {
   );
 }
 
+const sourceTypes = ["resume", "file", "text", "manual", "ai"];
+
 // ─── Practice Mode ───────────────────────────────────────────────────
 
 function PracticeMode() {
   const [questions, setQuestions] = useState<QuestionListItem[]>([]);
+  const [totalQuestions, setTotalQuestions] = useState(0);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
   // Filters
   const [domainFilter, setDomainFilter] = useState("");
   const [difficultyFilter, setDifficultyFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [resumeOnly, setResumeOnly] = useState(false);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
 
   // Current question
   const [currentQ, setCurrentQ] = useState<QuestionDetail | null>(null);
@@ -171,21 +184,29 @@ function PracticeMode() {
   const [evalError, setEvalError] = useState<string | null>(null);
   const [explainError, setExplainError] = useState<string | null>(null);
 
+  const resetToPage1 = useCallback(() => setPage(1), []);
+
   const loadQuestions = useCallback(async () => {
     setLoadingList(true);
     setListError(null);
     try {
-      const params: Record<string, string | number> = { offset: 0, limit: 200 };
+      const params: Record<string, string | number> = {
+        offset: (page - 1) * limit,
+        limit,
+      };
       if (domainFilter) params.domain_type = domainFilter;
       if (difficultyFilter) params.difficulty_level = parseInt(difficultyFilter, 10);
+      if (sourceFilter) params.source_type = sourceFilter;
+      if (resumeOnly) params.source_type = "resume";
       const res = await axios.get("/api/v1/questions", { params });
       setQuestions(res.data.items);
+      setTotalQuestions(res.data.total ?? res.data.items.length);
     } catch {
       setListError("加载题目失败，请确保后端服务正在运行");
     } finally {
       setLoadingList(false);
     }
-  }, [domainFilter, difficultyFilter]);
+  }, [page, limit, domainFilter, difficultyFilter, sourceFilter, resumeOnly]);
 
   useEffect(() => { loadQuestions(); }, [loadQuestions]);
 
@@ -214,7 +235,6 @@ function PracticeMode() {
     if (!currentQ || !answer.trim()) return;
     setEvaluating(true);
     try {
-      // 1. Evaluate
       const evalRes = await axios.post("/api/v1/ai/evaluate", {
         question_id: currentQ.id,
         user_answer: answer,
@@ -222,7 +242,6 @@ function PracticeMode() {
       const evalData: EvaluationResult = evalRes.data;
       setEvalResult(evalData);
 
-      // 2. Save study record
       await axios.post("/api/v1/study/records", {
         question_id: currentQ.id,
         study_type: "practice",
@@ -264,11 +283,27 @@ function PracticeMode() {
     pickQuestion(next);
   };
 
+  const handleFilterChange = (setter: (v: string) => void, value: string) => {
+    setter(value);
+    resetToPage1();
+    setQuestionIndex(-1);
+    setCurrentQ(null);
+  };
+
+  const handlePageSizeChange = (newSize: number) => {
+    setLimit(newSize);
+    setPage(1);
+  };
+
   const domains = ["RAG", "Backend", "Frontend", "Database", "DevOps", "Algorithm", "ML"];
 
   if (loadingList) return <div className="text-center text-gray-500 py-12">加载题目中...</div>;
   if (listError) return <div className="text-center text-red-500 py-12">{listError}</div>;
-  if (questions.length === 0) return <div className="text-center text-gray-500 py-12">暂无题目，请先导入题目。</div>;
+
+  // If questions loaded but none on this page, show empty
+  if (questions.length === 0 && totalQuestions === 0) {
+    return <EmptyState title="暂无题目" description="请先导入题目，然后回来练习" actionLabel="去导入" actionHref="/import" />;
+  }
 
   return (
     <div className="space-y-6">
@@ -277,7 +312,7 @@ function PracticeMode() {
         <div className="flex flex-wrap items-center gap-4 mb-4">
           <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600">领域:</label>
-            <select value={domainFilter} onChange={(e) => { setDomainFilter(e.target.value); setQuestionIndex(-1); setCurrentQ(null); }}
+            <select value={domainFilter} onChange={(e) => handleFilterChange(setDomainFilter, e.target.value)}
               className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
               <option value="">全部</option>
               {domains.map((d) => <option key={d} value={d}>{d}</option>)}
@@ -285,18 +320,38 @@ function PracticeMode() {
           </div>
           <div className="flex items-center gap-2">
             <label className="text-sm text-gray-600">难度:</label>
-            <select value={difficultyFilter} onChange={(e) => { setDifficultyFilter(e.target.value); setQuestionIndex(-1); setCurrentQ(null); }}
+            <select value={difficultyFilter} onChange={(e) => handleFilterChange(setDifficultyFilter, e.target.value)}
               className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
               <option value="">全部</option>
-              {[1,2,3,4,5].map((d) => <option key={d} value={d}>{d} - {difficultyText(d)}</option>)}
+              {[1, 2, 3, 4, 5].map((d) => <option key={d} value={d}>{d} - {difficultyText(d)}</option>)}
             </select>
           </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600">来源:</label>
+            <select value={sourceFilter} onChange={(e) => handleFilterChange(setSourceFilter, e.target.value)}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+              <option value="">全部</option>
+              {sourceTypes.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={resumeOnly}
+              onChange={(e) => { setResumeOnly(e.target.checked); resetToPage1(); setQuestionIndex(-1); setCurrentQ(null); }}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-gray-600">仅简历题</span>
+          </label>
           <button onClick={handleNext}
             className="px-4 py-1.5 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 transition-colors">
             {questionIndex < 0 ? "随机抽题" : "下一题"}
           </button>
         </div>
-        <p className="text-sm text-gray-500">共 {questions.length} 道题目可供练习</p>
+        <p className="text-sm text-gray-500">
+          共 {totalQuestions} 道题目
+          {questions.length > 0 && `，第 ${page} 页`}
+        </p>
       </div>
 
       {/* Question detail */}
@@ -316,6 +371,7 @@ function PracticeMode() {
               <span className={`px-2 py-1 rounded text-xs font-medium ${difficultyColor(currentQ.difficulty_level)}`}>
                 {difficultyText(currentQ.difficulty_level)}
               </span>
+              {currentQ.source_type && <SourceBadge source={currentQ.source_type} />}
               {questionIndex >= 0 && (
                 <span className="text-sm text-gray-400 ml-auto">{questionIndex + 1} / {questions.length}</span>
               )}
@@ -365,7 +421,6 @@ function PracticeMode() {
                 </span>
               </div>
 
-              {/* Feedback */}
               {evalResult.feedback && (
                 <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                   <h4 className="text-sm font-semibold text-blue-900 mb-1">反馈</h4>
@@ -373,7 +428,6 @@ function PracticeMode() {
                 </div>
               )}
 
-              {/* Missing points */}
               {evalResult.missing_points.length > 0 && (
                 <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
                   <h4 className="text-sm font-semibold text-amber-900 mb-2">遗漏要点</h4>
@@ -383,7 +437,6 @@ function PracticeMode() {
                 </div>
               )}
 
-              {/* Answer textarea (show after submission for reference) */}
               <details className="mb-4">
                 <summary className="text-sm text-gray-500 cursor-pointer">查看我的回答</summary>
                 <div className="mt-2 p-3 bg-gray-50 rounded-lg text-sm text-gray-700 whitespace-pre-wrap">{answer}</div>
@@ -453,14 +506,25 @@ function PracticeMode() {
         </>
       )}
 
-      {/* No question selected state */}
+      {/* No question selected state + pagination */}
       {!loadingDetail && !currentQ && questionIndex < 0 && (
-        <div className="text-center text-gray-400 py-16">
-          <svg className="mx-auto h-12 w-12 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
-          </svg>
-          <p className="text-lg font-medium">点击「随机抽题」开始练习</p>
-        </div>
+        <>
+          {totalQuestions > 0 && (
+            <Pagination
+              currentPage={page}
+              pageSize={limit}
+              total={totalQuestions}
+              onPageChange={setPage}
+              onPageSizeChange={handlePageSizeChange}
+            />
+          )}
+          <div className="text-center text-gray-400 py-16">
+            <svg className="mx-auto h-12 w-12 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+            </svg>
+            <p className="text-lg font-medium">点击「随机抽题」开始练习</p>
+          </div>
+        </>
       )}
     </div>
   );
@@ -470,8 +534,13 @@ function PracticeMode() {
 
 function ReviewMode() {
   const [reviewItems, setReviewItems] = useState<ReviewListItem[]>([]);
+  const [totalReviews, setTotalReviews] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
 
   // Active review
   const [activeQ, setActiveQ] = useState<QuestionDetail | null>(null);
@@ -486,14 +555,17 @@ function ReviewMode() {
     setLoading(true);
     setError(null);
     try {
-      const res = await axios.get("/api/v1/study/review-list");
+      const res = await axios.get("/api/v1/study/review-list", {
+        params: { offset: (page - 1) * limit, limit },
+      });
       setReviewItems(res.data.items);
+      setTotalReviews(res.data.total ?? res.data.items.length);
     } catch {
       setError("加载待复习列表失败");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, limit]);
 
   useEffect(() => { loadReviews(); }, [loadReviews]);
 
@@ -524,8 +596,8 @@ function ReviewMode() {
         user_answer: answer || null,
       });
       setSubmitSuccess(true);
-      // Remove from list
       setReviewItems((prev) => prev.filter((r) => r.question_id !== activeQ.id));
+      setTotalReviews((prev) => Math.max(0, prev - 1));
     } catch {
       setSubmitError("记录复习失败");
     } finally {
@@ -617,19 +689,16 @@ function ReviewMode() {
   // Review list
   if (reviewItems.length === 0) {
     return (
-      <div className="text-center text-gray-400 py-16">
-        <svg className="mx-auto h-12 w-12 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-        </svg>
-        <p className="text-lg font-medium">暂无待复习题目</p>
-        <p className="text-sm mt-1">完成练习后，题目会进入复习计划</p>
-      </div>
+      <EmptyState
+        title="暂无待复习题目"
+        description="完成练习后，题目会进入复习计划"
+      />
     );
   }
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-gray-500 mb-4">共 {reviewItems.length} 道题目待复习</p>
+      <p className="text-sm text-gray-500 mb-4">共 {totalReviews} 道题目待复习</p>
       {reviewItems.map((item) => (
         <div key={item.question_id}
           className="bg-white rounded-lg shadow-sm border p-4 flex flex-col sm:flex-row sm:items-center gap-3 hover:border-blue-300 transition-colors">
@@ -655,6 +724,14 @@ function ReviewMode() {
           </div>
         </div>
       ))}
+
+      <Pagination
+        currentPage={page}
+        pageSize={limit}
+        total={totalReviews}
+        onPageChange={setPage}
+        onPageSizeChange={(s) => { setLimit(s); setPage(1); }}
+      />
     </div>
   );
 }

@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
+import EmptyState from "@/components/EmptyState";
+import Pagination from "@/components/Pagination";
+import SourceBadge from "@/components/SourceBadge";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -21,6 +24,7 @@ interface StudyRecord {
   study_type: string;
   ai_score: number | null;
   mastery_level: number | null;
+  source_type: string | null;
   created_at: string;
 }
 
@@ -70,8 +74,31 @@ function studyTypeLabel(type: string) {
 export default function StatsPage() {
   const [stats, setStats] = useState<StudyStats | null>(null);
   const [records, setRecords] = useState<StudyRecord[]>([]);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+
+  // Source breakdown
+  const [sourceBreakdown, setSourceBreakdown] = useState<Record<string, number> | null>(null);
+  const [loadingSource, setLoadingSource] = useState(false);
+
+  const loadSourceBreakdown = useCallback(async () => {
+    setLoadingSource(true);
+    try {
+      const res = await axios.get("/api/v1/study/stats/by-source");
+      if (res.data && typeof res.data === "object") {
+        setSourceBreakdown(res.data);
+      }
+    } catch {
+      // endpoint may not exist — leave null
+    } finally {
+      setLoadingSource(false);
+    }
+  }, []);
 
   useEffect(() => {
     async function loadData() {
@@ -80,11 +107,16 @@ export default function StatsPage() {
       try {
         const [statsRes, recordsRes] = await Promise.allSettled([
           axios.get<StudyStats>("/api/v1/study/stats"),
-          axios.get<{ items: StudyRecord[] }>("/api/v1/study/records", { params: { limit: 100 } }),
+          axios.get<{ items: StudyRecord[]; total?: number }>("/api/v1/study/records", {
+            params: { offset: (page - 1) * limit, limit },
+          }),
         ]);
 
         if (statsRes.status === "fulfilled") setStats(statsRes.value.data);
-        if (recordsRes.status === "fulfilled") setRecords(recordsRes.value.data.items);
+        if (recordsRes.status === "fulfilled") {
+          setRecords(recordsRes.value.data.items);
+          setTotalRecords(recordsRes.value.data.total ?? recordsRes.value.data.items.length);
+        }
         if (statsRes.status === "rejected" && recordsRes.status === "rejected") {
           setError("获取数据失败，请确保后端服务正在运行");
         }
@@ -95,7 +127,8 @@ export default function StatsPage() {
       }
     }
     loadData();
-  }, []);
+    loadSourceBreakdown();
+  }, [page, limit, loadSourceBreakdown]);
 
   if (loading) return <div className="max-w-5xl mx-auto px-4 py-12 text-center text-gray-500">加载中...</div>;
   if (error) return <div className="max-w-5xl mx-auto px-4 py-12 text-center text-red-500">{error}</div>;
@@ -164,6 +197,25 @@ export default function StatsPage() {
               </div>
             </div>
           </div>
+
+          {/* Source dimension breakdown */}
+          <div className="bg-white rounded-lg shadow-sm border p-6 mb-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">题目来源分布</h3>
+            {loadingSource ? (
+              <p className="text-gray-500 text-sm">加载中...</p>
+            ) : sourceBreakdown ? (
+              <div className="flex flex-wrap gap-3">
+                {Object.entries(sourceBreakdown).map(([source, count]) => (
+                  <div key={source} className="flex items-center gap-2 bg-gray-50 rounded-lg px-4 py-3">
+                    <SourceBadge source={source} />
+                    <span className="text-lg font-bold text-gray-900">{count}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">来源维度统计暂未开放</p>
+            )}
+          </div>
         </>
       )}
 
@@ -171,38 +223,52 @@ export default function StatsPage() {
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">最近学习记录</h3>
         {records.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">暂无学习记录</p>
+          <EmptyState
+            title="暂无学习记录"
+            description="开始练习或复习后，这里会显示你的学习记录"
+          />
         ) : (
-          <div className="space-y-3">
-            {records.slice(0, 10).map((r, i) => (
-              <div key={r.id} className="flex items-start gap-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                {/* Timeline dot */}
-                <div className="flex flex-col items-center pt-1">
-                  <div className={`w-3 h-3 rounded-full ${r.study_type === "practice" ? "bg-blue-500" : "bg-green-500"}`} />
-                  {i < Math.min(records.length, 10) - 1 && <div className="w-0.5 h-8 bg-gray-200 mt-1" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-gray-900 truncate">{r.question_title || "无标题"}</span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                      r.study_type === "practice" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
-                    }`}>
-                      {studyTypeLabel(r.study_type)}
-                    </span>
-                    {r.ai_score != null && (
-                      <span className={`text-sm font-bold ${scoreColor(r.ai_score)}`}>{r.ai_score} 分</span>
-                    )}
-                    {r.mastery_level != null && (
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${masteryColor(r.mastery_level)}`}>
-                        {masteryLabel(r.mastery_level)}
-                      </span>
-                    )}
+          <>
+            <div className="space-y-3">
+              {records.map((r, i) => (
+                <div key={r.id} className="flex items-start gap-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
+                  {/* Timeline dot */}
+                  <div className="flex flex-col items-center pt-1">
+                    <div className={`w-3 h-3 rounded-full ${r.study_type === "practice" ? "bg-blue-500" : "bg-green-500"}`} />
+                    {i < records.length - 1 && <div className="w-0.5 h-8 bg-gray-200 mt-1" />}
                   </div>
-                  <span className="text-xs text-gray-400 mt-1">{formatTime(r.created_at)}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-gray-900 truncate">{r.question_title || "无标题"}</span>
+                      {r.source_type && <SourceBadge source={r.source_type} />}
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        r.study_type === "practice" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700"
+                      }`}>
+                        {studyTypeLabel(r.study_type)}
+                      </span>
+                      {r.ai_score != null && (
+                        <span className={`text-sm font-bold ${scoreColor(r.ai_score)}`}>{r.ai_score} 分</span>
+                      )}
+                      {r.mastery_level != null && (
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${masteryColor(r.mastery_level)}`}>
+                          {masteryLabel(r.mastery_level)}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-400 mt-1">{formatTime(r.created_at)}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+
+            <Pagination
+              currentPage={page}
+              pageSize={limit}
+              total={totalRecords}
+              onPageChange={setPage}
+              onPageSizeChange={(s) => { setLimit(s); setPage(1); }}
+            />
+          </>
         )}
       </div>
     </div>

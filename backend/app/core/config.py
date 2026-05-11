@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "dashscope"
     LLM_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     LLM_API_KEY: str = ""
-    LLM_MODEL_NAME: str = "claude-sonnet-4-20250514"
+    LLM_MODEL_NAME: str = "qwen3-vl-plus"
     LLM_MAX_RETRIES: int = 3
-    LLM_TIMEOUT: int = 60
+    LLM_TIMEOUT: int = 180
 
     # --- Embedding ---
     EMBEDDING_PROVIDER: str = "local"

@@ -10,3 +10,27 @@ build/
 *.egg-info/
 uploads/
 test_resume.txt
+
+# Claude Code temp files (random short names)
+backend/[a-zA-Z0-9_][a-zA-Z0-9_][a-zA-Z0-9_][a-zA-Z0-9_][a-zA-Z0-9_]*
+backend/.tmp/
+
+# Docker data
+docker-data/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite3

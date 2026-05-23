@@ -272,6 +272,65 @@ flowchart LR
 
 ---
 
+## 11. 认证与登录设计
+
+### 11.1 设计原则
+
+- **默认关闭**：`AUTH_ENABLED=false` 时所有接口开放，单用户模式
+- **配置开关**：通过环境变量 `AUTH_ENABLED=true` 启用登录
+- **不破坏现有体验**：无认证接口不受影响，受保护接口通过 `Depends(get_current_user)` 按需挂载
+
+### 11.2 技术选型
+
+| 组件 | 方案 | 说明 |
+|------|------|------|
+| 密码哈希 | `passlib[bcrypt]` | bcrypt 算法，自动盐值 |
+| JWT 令牌 | `python-jose[cryptography]` | HS256 算法 |
+| Access Token | 30 分钟有效期 | 用于 API 请求鉴权 |
+| Refresh Token | 7 天有效期 | 用于无感刷新 |
+| 用户存储 | PostgreSQL `users` 表 | SQLModel 模型 |
+
+### 11.3 用户模型
+
+```
+User(id: UUID, username: str unique, email: str unique nullable,
+     password_hash: str, is_active: bool, created_at, updated_at)
+```
+
+### 11.4 API 端点
+
+| 端点 | 方法 | 认证 | 说明 |
+|------|------|------|------|
+| `POST /api/v1/auth/register` | POST | 无 | 注册新用户 |
+| `POST /api/v1/auth/login` | POST | 无 | 登录获取令牌 |
+| `POST /api/v1/auth/refresh` | POST | 无 | 刷新访问令牌 |
+| `GET /api/v1/auth/me` | GET | 需要 | 获取当前用户信息 |
+| `GET /api/v1/auth/config` | GET | 无 | 获取认证配置（前端探测） |
+
+### 11.5 令牌格式
+
+```json
+// Access Token payload
+{"sub": "username", "exp": 1716000000}
+
+// Refresh Token payload
+{"sub": "username", "type": "refresh", "exp": 1716000000}
+```
+
+### 11.6 依赖注入
+
+```python
+@router.get("/protected")
+async def protected_route(current_user: User = Depends(get_current_user)):
+    # current_user 为已认证的数据库用户
+    ...
+```
+
+当 `AUTH_ENABLED=false` 时，`get_current_user` 返回一个匿名占位用户，
+使受保护路由仍能正常调用，不影响现有无认证接口。
+
+---
+
 ## 10. 工程建议
 
 - 所有 AI 输出必须走结构化 schema

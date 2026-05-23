@@ -5,6 +5,8 @@ from datetime import datetime
 
 from sqlmodel import Field, Relationship, SQLModel
 
+from app.domain.models.user import User  # noqa: F401 — ensure table is registered
+
 
 # ── SQLAlchemy column helpers (pgvector + JSONB) ──
 
@@ -36,6 +38,7 @@ class Question(SQLModel, table=True):
     __tablename__ = "questions"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: str | None = Field(default=None, max_length=255)
     title: str = Field(max_length=500)
     content: str
     content_hash: str | None = Field(default=None, max_length=128)
@@ -269,6 +272,7 @@ class Resume(SQLModel, table=True):
     __tablename__ = "resumes"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: str | None = Field(default=None, max_length=255)
     file_id: uuid.UUID | None = Field(default=None, foreign_key="files.id")
     file_name: str = Field(max_length=255)
     file_path: str = Field(max_length=500)
@@ -304,6 +308,99 @@ class ResumeExperience(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     resume: "Resume" = Relationship(back_populates="experiences")
+
+
+# ── Event_Audit_Logs ──
+
+class EventAuditLog(SQLModel, table=True):
+    __tablename__ = "event_audit_logs"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    event_type: str = Field(max_length=100)
+    backend: str = Field(max_length=50)
+    task_id: uuid.UUID | None = Field(default=None)
+    session_id: str | None = Field(default=None, max_length=100)
+    source: str | None = Field(default=None, max_length=100)
+    status: str = Field(default="ok", max_length=20)
+    payload: dict | None = Field(default=None, sa_column=_jsonb_column())
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── LLM_Call_Logs ──
+
+class LLMCallLog(SQLModel, table=True):
+    __tablename__ = "llm_call_logs"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    task_id: uuid.UUID | None = Field(default=None)
+    session_id: str | None = Field(default=None, max_length=100)
+    prompt_key: str = Field(max_length=100)
+    prompt_version: str = Field(max_length=100)
+    model_name: str = Field(max_length=100)
+    request_preview: str = Field(default="", max_length=500)
+    response_preview: str = Field(default="", max_length=500)
+    duration_ms: int = Field()
+    status: str = Field(max_length=20)
+    error_code: str | None = Field(default=None, max_length=50)
+    error_message: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── Tasks ──
+
+class Task(SQLModel, table=True):
+    __tablename__ = "tasks"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    task_type: str = Field(max_length=50)
+    source_id: str | None = Field(default=None, max_length=100)
+    status: str = Field(default="pending", max_length=20)
+    progress: float = Field(default=0.0)
+    current_phase: str | None = Field(default=None, max_length=50)
+    total_chunks: int | None = None
+    processed_chunks: int | None = None
+    error_message: str | None = Field(default=None, max_length=500)
+    retry_count: int = Field(default=0)
+    extra_data: dict | None = Field(default=None, sa_column=_jsonb_column())
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── Exam Sessions ──
+
+class ExamSession(SQLModel, table=True):
+    __tablename__ = "exam_sessions"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: str | None = Field(default=None, max_length=255)
+    title: str | None = Field(default=None, max_length=200)
+    duration_minutes: int = Field(default=60)
+    total_questions: int = Field(default=10)
+    difficulty_filter: str | None = Field(default=None, max_length=50)
+    source_filter: str | None = Field(default=None, max_length=50)
+    question_ids: list = Field(default_factory=list, sa_column=_jsonb_column())
+    status: str = Field(default="pending", max_length=20)  # pending, in_progress, submitted, graded
+    started_at: datetime | None = None
+    submitted_at: datetime | None = None
+    total_score: float | None = None
+    extra_data: dict | None = Field(default=None, sa_column=_jsonb_column())
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ExamAnswer(SQLModel, table=True):
+    __tablename__ = "exam_answers"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: uuid.UUID = Field(foreign_key="exam_sessions.id")
+    question_id: uuid.UUID = Field(foreign_key="questions.id")
+    user_answer: str | None = None
+    score: float | None = None
+    feedback: str | None = None
+    time_spent_seconds: int | None = None
+    extra_data: dict | None = Field(default=None, sa_column=_jsonb_column())
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # ── Expose metadata for Alembic ──

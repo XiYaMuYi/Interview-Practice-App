@@ -30,8 +30,16 @@ export function usePaginatedQuery<T = unknown>(
   const [page, setPage] = useState(1);
   const [currentPageSize, setPageSizeState] = useState(pageSize);
 
-  const filtersRef = useRef(filters);
-  filtersRef.current = filters;
+  // Track filters to detect changes and reset page
+  const prevFiltersRef = useRef(filters);
+
+  useEffect(() => {
+    // When filters change (search, sort, etc), reset to page 1
+    if (JSON.stringify(filters) !== JSON.stringify(prevFiltersRef.current)) {
+      setPage(1);
+      prevFiltersRef.current = filters;
+    }
+  }, [filters]);
 
   const fetchData = useCallback(async () => {
     if (!enabled) return;
@@ -42,21 +50,30 @@ export function usePaginatedQuery<T = unknown>(
         page,
         page_size: currentPageSize,
       };
-      for (const [key, value] of Object.entries(filtersRef.current)) {
+      for (const [key, value] of Object.entries(filters)) {
         if (value !== undefined && value !== "") {
-          params[key] = value;
+          const v: string | number | boolean =
+            typeof value === "boolean" ? value : String(value);
+          params[key] = v;
         }
       }
       const res = await axios.get<PaginatedData<T>>(url, { params });
-      const result = res.data;
+      const result = options.onDataTransform
+        ? options.onDataTransform(res.data)
+        : res.data;
       setData(result.items);
       setTotal(result.total);
       setTotalPages(result.total_pages);
-    } catch {
-      setError("Failed to fetch data");
+    } catch (e: unknown) {
+      const message =
+        axios.isAxiosError(e) && e.response?.data?.detail
+          ? e.response.data.detail
+          : "Failed to fetch data";
+      setError(String(message));
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, currentPageSize, url, enabled]);
 
   useEffect(() => {

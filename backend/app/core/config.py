@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     PUBLIC_MODE: bool = True
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # --- File Storage ---
     UPLOAD_DIR: str = "uploads"
@@ -47,6 +48,20 @@ class Settings(BaseSettings):
 
     # --- Vector DB ---
     VECTOR_STORE_TYPE: str = "pgvector"
+
+    # --- Redis Cache ---
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_CACHE_TTL: int = 3600
+    REDIS_ENABLED: bool = False
+
+    # --- RabbitMQ ---
+    RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
+    RABBITMQ_ENABLED: bool = False
+
+    # --- Kafka Event Stream ---
+    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
+    KAFKA_ENABLED: bool = False
+    EVENT_BACKEND: str = "inmemory"  # inmemory | kafka
 
 
 settings = Settings()

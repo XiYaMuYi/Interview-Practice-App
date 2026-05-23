@@ -60,7 +60,7 @@ class ChatService:
             sessions.append({
                 "session_id": row[0],
                 "created_at": row[1],
-                "message_count": count_result.one(),
+                "message_count": count_result.scalar_one(),
             })
         return sessions
 
@@ -74,7 +74,7 @@ class ChatService:
 
         # Count distinct sessions
         count_stmt = select(sa_func.count(sa_func.distinct(ChatHistory.session_id)))
-        total = (await self.session.exec(count_stmt)).one()
+        total = (await self.session.exec(count_stmt)).scalar_one()
 
         # Data query
         stmt = (
@@ -96,7 +96,7 @@ class ChatService:
             sessions.append({
                 "session_id": row[0],
                 "created_at": row[1],
-                "message_count": count_result.one(),
+                "message_count": count_result.scalar_one(),
             })
         return sessions, total
 

@@ -1,0 +1,58 @@
+You are a frontend/backend engineer. Fix ALL 9 remaining issues in the pagination module. Read this prompt carefully and execute every item.
+
+## Architecture Context
+
+First read these architecture docs to understand the target structure:
+- readme/09_Pagination_Module_Architecture.md
+- readme/10_Backend_Pagination_Interface_Spec.md
+
+## Issues to Fix (ALL 9)
+
+### Issue 1-2: Missing files
+1. Create `src/components/states/index.ts` — barrel export for LoadingState, EmptyState, ErrorState
+2. Create `src/lib/pagination.ts` — utility lib for pagination helpers (can re-export or contain helper functions like calculateOffset, calculateTotalPages, etc.)
+
+### Issue 3-6: Files in wrong directory
+Per architecture doc 09 section 3.1, these files must be in nested subdirectories:
+
+- Move `src/components/Pagination.tsx` → `src/components/pagination/Pagination.tsx`
+- Move `src/components/LoadingState.tsx` → `src/components/states/LoadingState.tsx`
+- Move `src/components/EmptyState.tsx` → `src/components/states/EmptyState.tsx`
+- Move `src/components/ErrorState.tsx` → `src/components/states/ErrorState.tsx`
+
+**CRITICAL:** After moving, update ALL import statements across the entire codebase that reference these files. Search for:
+- `from '../Pagination'` or `from '@/components/Pagination'` or `from '../components/Pagination'`
+- `from './LoadingState'` or `from '@/components/LoadingState'`
+- `from './EmptyState'` or `from '@/components/EmptyState'`
+- `from './ErrorState'` or `from '@/components/ErrorState'`
+
+Update them to the new paths under `components/pagination/` and `components/states/`.
+
+### Issue 7: Update pagination/index.ts
+After moving Pagination.tsx into the pagination/ directory, update `src/components/pagination/index.ts` to also export Pagination:
+```ts
+export { Pagination } from './Pagination';
+export { PageSizeSelector } from './PageSizeSelector';
+export { PaginationSummary } from './PaginationSummary';
+```
+
+### Issue 8: Add 30 to page size options
+In `src/app/questions/QuestionsPageClient.tsx`, change `PAGE_SIZE_OPTIONS` from `[10, 20, 50]` to `[10, 20, 30, 50]` to match the architecture spec.
+
+### Issue 9: Fix search endpoint response structure
+In `backend/app/api/v1/routes/question_routes.py`, the `/search` endpoint returns `{total, limit, query, items}` instead of the standard `{items, total, page, page_size, total_pages}`.
+
+Update it to use `build_paginated_response`. The search endpoint takes `limit` instead of `page/page_size`, so adapt it:
+- Add optional `page` and `page_size` params (default page=1, page_size=limit)
+- Use `build_paginated_response` with the correct fields
+- Calculate total_pages based on total results and page_size
+
+## After all fixes
+
+Run `npm run build` in the web/ directory. It MUST pass with zero errors and zero warnings.
+
+## Rules
+- Do not change UI appearance or functionality
+- Do not modify backend logic beyond fixing the search endpoint response structure
+- Update ALL imports when moving files — do a thorough search across the entire codebase
+- Keep git history intact (use git mv for moves)

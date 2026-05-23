@@ -292,9 +292,9 @@ class AIExplanationRequest(BaseModel):
 class AIExplanationResponse(BaseModel):
     """AI-generated explanation."""
 
-    answer_short: str
-    answer_detail: str
-    explanation: str
+    answer_short: str = ""
+    answer_detail: str = ""
+    explanation: str = ""
     knowledge_points: list[str] = []
     common_pitfalls: str | None = None
     related_questions: list[str] = []
@@ -330,6 +330,10 @@ class InterviewAnswerResponse(BaseModel):
     score: int | None = None
     feedback: str | None = None
     is_done: bool
+    # ReAct safety / convergence visibility (optional, backward-compatible)
+    turns_remaining: int | None = None
+    convergence_reason: str | None = None  # "max_turns_reached" | "score_threshold_met" | "manual_stop" | "timeout"
+    is_timeout: bool | None = None
 
 
 class EvaluationRequest(BaseModel):
@@ -349,6 +353,47 @@ class EvaluationResponse(BaseModel):
     mastery_level: int
 
 
+class ReviewReportRequest(BaseModel):
+    """请求生成复盘报告"""
+
+    session_id: str | None = None
+    days: int = 7
+    include_feedback: bool = True
+
+
+class ReviewReportResponse(BaseModel):
+    """复盘报告响应"""
+
+    report_id: str
+    status: str
+    period_days: int
+    total_sessions: int
+    mastered_count: int
+    weak_areas: list[dict]
+    summary: str | None = None
+    recommendations: list[str] | None = None
+    created_at: str
+
+
+class LearningPathRequest(BaseModel):
+    """请求生成学习路径"""
+
+    focus_areas: list[str] = []
+    max_items: int = 20
+    strategy: str = "weak_first"
+
+
+class LearningPathResponse(BaseModel):
+    """学习路径响应"""
+
+    path_id: str
+    status: str
+    strategy: str
+    items: list[dict]
+    total_weak_count: int
+    created_at: str
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Auth DTOs
 # ─────────────────────────────────────────────────────────────────────
@@ -365,7 +410,26 @@ class LoginResponse(BaseModel):
     """Successful login response."""
 
     access_token: str
+    refresh_token: str = ""
     token_type: str = "bearer"
+    expires_in: int
+
+
+class RegisterRequest(BaseModel):
+    """User registration request."""
+
+    username: str
+    password: str
+    email: str | None = None
+
+
+class RegisterResponse(BaseModel):
+    """User registration response."""
+
+    user_id: str
+    username: str
+    access_token: str
+    refresh_token: str
     expires_in: int
 
 
@@ -381,3 +445,78 @@ class TokenRefreshResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Prompt Version & Observability DTOs
+# ─────────────────────────────────────────────────────────────────────
+
+
+class PromptVersionInfo(BaseModel):
+    """Metadata for a single prompt version in a list view."""
+
+    id: UUID | None = None
+    key: str
+    version: str
+    description: str
+    created_at: datetime
+    is_active: bool = False
+
+
+class PromptVersionDetail(BaseModel):
+    """Full detail of a prompt version including content."""
+
+    id: UUID
+    key: str
+    version: str
+    description: str
+    content: str
+    model_hints: dict = {}
+    created_at: datetime
+    is_active: bool = False
+
+
+class PromptVersionCompare(BaseModel):
+    """Side-by-side comparison of two prompt versions."""
+
+    key: str
+    v1_version: str
+    v1_content: str
+    v2_version: str
+    v2_content: str
+    diff_summary: str
+
+
+class PromptStats(BaseModel):
+    """Aggregated invocation statistics for a prompt key."""
+
+    key: str
+    total_calls: int
+    success_rate: float
+    avg_duration_ms: float
+    error_rate: float
+
+
+class LLMCallLogResponse(BaseModel):
+    """Single LLM call log entry."""
+
+    id: UUID
+    task_id: UUID | None = None
+    session_id: str | None = None
+    prompt_key: str
+    prompt_version: str
+    model_name: str
+    duration_ms: int
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PromptVersionCreate(BaseModel):
+    """Request body to register a new prompt version."""
+
+    version: str = Field(max_length=100)
+    content: str
+    model_hints: dict = {}
+    description: str = ""

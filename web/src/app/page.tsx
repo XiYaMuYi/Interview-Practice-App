@@ -3,9 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import axios from "axios";
-import ErrorState from "@/components/ErrorState";
-import LoadingState from "@/components/LoadingState";
-import EmptyState from "@/components/EmptyState";
+import { ErrorState, LoadingState, EmptyState } from "@/components/states";
 import TaskStatusBadge from "@/components/TaskStatusBadge";
 import SourceBadge from "@/components/SourceBadge";
 
@@ -55,13 +53,13 @@ interface ListResponse {
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 const difficultyColor = (level: number | null) => {
-  if (level == null) return "bg-gray-100 text-gray-600";
+  if (level == null) return "secondary-chip";
   const map: Record<number, string> = {
-    1: "bg-green-100 text-green-700", 2: "bg-lime-100 text-lime-700",
-    3: "bg-yellow-100 text-yellow-700", 4: "bg-orange-100 text-orange-700",
-    5: "bg-red-100 text-red-700",
+    1: "diff-1", 2: "diff-2",
+    3: "diff-3", 4: "diff-4",
+    5: "diff-5",
   };
-  return map[level] || "bg-gray-100 text-gray-600";
+  return map[level] || "secondary-chip";
 };
 
 const difficultyText = (level: number | null) => {
@@ -182,15 +180,26 @@ export default function HomePage() {
       ),
       accent: "border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50",
     },
+    {
+      title: "模拟笔试",
+      description: "自定义题量、时长、难度，AI 自动批改",
+      href: "/exam",
+      icon: (
+        <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      ),
+      accent: "border-teal-200 hover:border-teal-400 hover:bg-teal-50",
+    },
   ];
 
   // ── Quick stats ───────────────────────────────────────────────────
 
   const quickStats = stats
     ? [
-        { label: "总练习次数", value: stats.total_practice, color: "text-blue-600" },
-        { label: "平均分数", value: stats.average_score != null ? stats.average_score.toFixed(1) : "—", color: "text-purple-600" },
-        { label: "已掌握", value: stats.questions_mastered, color: "text-green-600" },
+        { label: "总练习次数", value: stats.total_practice, color: "text-sky-600" },
+        { label: "平均分数", value: stats.average_score != null ? stats.average_score.toFixed(1) : "—", color: "text-violet-600" },
+        { label: "已掌握", value: stats.questions_mastered, color: "text-emerald-600" },
         { label: "待复习", value: stats.questions_pending, color: "text-amber-600" },
       ]
     : [];
@@ -199,10 +208,10 @@ export default function HomePage() {
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="page-frame">
         <div className="text-center mb-12">
-          <div className="h-10 w-48 bg-gray-200 rounded animate-pulse mx-auto mb-4" />
-          <div className="h-5 w-96 bg-gray-100 rounded animate-pulse mx-auto" />
+          <div className="h-10 w-48 bg-slate-200 rounded animate-pulse mx-auto mb-4" />
+          <div className="h-5 w-96 bg-slate-100 rounded animate-pulse mx-auto" />
         </div>
         <LoadingState variant="skeleton" count={3} />
       </div>
@@ -213,10 +222,10 @@ export default function HomePage() {
 
   if (error && quickStats.length === 0 && recentQuestions.length === 0) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="page-frame">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">面试练习平台</h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+          <h1 className="page-title">面试练习平台</h1>
+          <p className="page-subtitle">
             导入题目、分类管理、AI 模拟面试，帮助你系统地准备技术面试
           </p>
         </div>
@@ -229,44 +238,42 @@ export default function HomePage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div className="page-frame">
       {/* Hero */}
-      <div className="text-center mb-12">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">
-          面试练习平台
-        </h1>
-        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+      <div className="text-center mb-10">
+        <h1 className="page-title">面试练习平台</h1>
+        <p className="page-subtitle">
           导入题目、分类管理、AI 模拟面试，帮助你系统地准备技术面试
         </p>
       </div>
 
       {/* Quick Stats */}
       {quickStats.length > 0 && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
           {quickStats.map(({ label, value, color }) => (
-            <div key={label} className="bg-white rounded-xl shadow-sm border p-5 text-center">
+            <div key={label} className="soft-card soft-card-hover p-5 text-center">
               <div className={`text-3xl font-bold ${color}`}>{value}</div>
-              <div className="text-sm text-gray-500 mt-1">{label}</div>
+              <div className="text-sm text-slate-500 mt-1">{label}</div>
             </div>
           ))}
         </div>
       )}
 
       {/* Feature Cards — priority card first */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
         {features.map((f) => (
           <Link
             key={f.href}
             href={f.href}
-            className={`rounded-xl shadow-sm border p-6 transition-all group ${f.accent} ${
+            className={`soft-card soft-card-hover p-6 group ${f.accent} ${
               f.priority ? "sm:col-span-2 lg:col-span-1 lg:row-span-2 flex flex-col justify-center" : ""
             }`}
           >
-            <div className={`mb-4 ${f.priority ? "text-rose-600" : "text-gray-700"}`}>{f.icon}</div>
-            <h3 className={`font-semibold group-hover:text-blue-600 transition-colors ${f.priority ? "text-2xl mb-3" : "text-xl mb-2"}`}>
+            <div className={`mb-4 ${f.priority ? "text-rose-600" : "text-slate-700"}`}>{f.icon}</div>
+            <h3 className={`font-semibold group-hover:text-sky-600 transition-colors ${f.priority ? "text-2xl mb-3" : "text-xl mb-2"}`}>
               {f.title}
             </h3>
-            <p className={f.priority ? "text-gray-600 text-base" : "text-gray-600"}>{f.description}</p>
+            <p className={f.priority ? "text-slate-600 text-base" : "text-slate-600"}>{f.description}</p>
           </Link>
         ))}
       </div>
@@ -274,10 +281,10 @@ export default function HomePage() {
       {/* Two-column: Recent resumes + Recent questions */}
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Recent Resumes */}
-        <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="soft-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">最近简历</h2>
-            <Link href="/import" className="text-sm text-blue-600 hover:text-blue-800 transition-colors">
+            <h2 className="section-title">最近简历</h2>
+            <Link href="/import" className="text-sm text-sky-600 hover:text-sky-800 transition-colors">
               管理 &rarr;
             </Link>
           </div>
@@ -291,27 +298,27 @@ export default function HomePage() {
           ) : (
             <ul className="space-y-3">
               {recentResumes.map((r) => (
-                <li key={r.id} className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3 last:border-0 last:pb-0">
+                <li key={r.id} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       <SourceBadge source={r.source_type} />
                       <TaskStatusBadge status={r.parse_status} />
                     </div>
-                    <p className="text-sm font-medium text-gray-900 truncate">{r.file_name}</p>
+                    <p className="text-sm font-medium text-slate-900 truncate">{r.file_name}</p>
                     {r.structured_summary?.title && (
-                      <p className="text-xs text-gray-500 mt-0.5">{r.structured_summary.title}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{r.structured_summary.title}</p>
                     )}
                     {r.structured_summary?.top_skills && r.structured_summary.top_skills.length > 0 && (
-                      <p className="text-xs text-gray-400 mt-0.5">
+                      <p className="text-xs text-slate-400 mt-0.5">
                         {r.structured_summary.top_skills.slice(0, 5).join("、")}
                       </p>
                     )}
-                    <p className="text-xs text-gray-400 mt-0.5">{formatDate(r.created_at)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{formatDate(r.created_at)}</p>
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <Link
                       href="/study"
-                      className="px-3 py-1 text-xs text-blue-600 border border-blue-300 rounded hover:bg-blue-50 transition-colors"
+                      className="btn-secondary px-3 py-1 text-xs"
                     >
                       开始面试
                     </Link>
@@ -323,10 +330,10 @@ export default function HomePage() {
         </div>
 
         {/* Recent Questions */}
-        <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="soft-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">最近导入</h2>
-            <Link href="/questions" className="text-sm text-blue-600 hover:text-blue-800 transition-colors">
+            <h2 className="section-title">最近导入</h2>
+            <Link href="/questions" className="text-sm text-sky-600 hover:text-sky-800 transition-colors">
               查看全部 &rarr;
             </Link>
           </div>
@@ -343,10 +350,10 @@ export default function HomePage() {
                 <li key={q.id}>
                   <Link
                     href={`/questions/${q.id}`}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors group"
+                    className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors group"
                   >
                     <div className="min-w-0 flex-1">
-                      <span className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors truncate block">
+                      <span className="font-medium text-slate-900 group-hover:text-sky-600 transition-colors truncate block">
                         {q.title || "无标题"}
                       </span>
                       {q.source_type && (
@@ -356,7 +363,7 @@ export default function HomePage() {
                       )}
                     </div>
                     <div className="flex gap-2 shrink-0 ml-4">
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${difficultyColor(q.difficulty_level)}`}>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${difficultyColor(q.difficulty_level)}`}>
                         {difficultyText(q.difficulty_level)}
                       </span>
                     </div>
@@ -370,9 +377,9 @@ export default function HomePage() {
 
       {/* Error banner if partial load failed */}
       {error && (quickStats.length > 0 || recentQuestions.length > 0 || recentResumes.length > 0) && (
-        <div className="mt-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-700 flex items-center justify-between">
+        <div className="mt-6 p-4 bg-amber-50/80 border border-amber-200 rounded-xl text-sm text-amber-700 flex items-center justify-between">
           <span>{error}，部分数据可能未加载</span>
-          <button onClick={loadOverview} className="text-yellow-800 underline ml-4">
+          <button onClick={loadOverview} className="text-amber-800 underline ml-4">
             重试
           </button>
         </div>

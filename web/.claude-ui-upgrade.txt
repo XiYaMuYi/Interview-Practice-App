@@ -1,0 +1,109 @@
+You are a senior frontend engineer doing a unified visual enhancement across all pages.
+
+## Design System Reference
+READ THESE FIRST:
+- readme/11_UI_Style_and_Motivation_System.md
+- readme/12_UI_Redesign_Instructions_For_Agent.md
+- web/src/app/globals.css (already has design tokens: soft-card, nav-link, page-title, section-title, primary-chip, secondary-chip, learning-rhythm, etc.)
+- web/src/app/layout.tsx (already upgraded with glass-morphism header, brand area, unified nav)
+
+## Current Baseline
+- `globals.css` already has: CSS variables, .soft-card, .soft-card-hover, .page-title, .page-subtitle, .section-title, .section-hint, .primary-chip, .secondary-chip, .learning-rhythm, .app-main-frame, .nav-link, .mobile-nav-chip
+- `layout.tsx` already has: semi-transparent header, gradient brand logo, nav links with .nav-link, mobile nav chips
+- `web/src/components/pagination/` has: Pagination, PageSizeSelector, PaginationSummary
+- `web/src/components/states/` has: LoadingState, EmptyState, ErrorState
+- `web/src/components/filters/FilterBar.tsx` exists
+- `web/src/components/SourceBadge.tsx` exists
+
+## Pages to Enhance (in priority order)
+1. `web/src/app/page.tsx` — Home page (学习驾驶舱)
+2. `web/src/app/import/page.tsx` — Import page (知识入口站)
+3. `web/src/app/questions/page.tsx` + `QuestionsPageClient.tsx` — Question list (题库工作台)
+4. `web/src/app/questions/[id]/page.tsx` — Question detail (学习讲义页)
+5. `web/src/app/study/page.tsx` — Study page (练习/复习)
+6. `web/src/app/interview/page.tsx` — Mock interview (面试舱)
+7. `web/src/app/stats/page.tsx` — Stats page (进步仪表盘)
+
+## Enhancement Goals
+
+### Apply consistently across ALL pages:
+- Use `.soft-card` for all card containers instead of inline `rounded-xl border bg-white shadow-md`
+- Use `.page-title` and `.page-subtitle` for page headers
+- Use `.section-title` and `.section-hint` for section headers
+- Use `.primary-chip` and `.secondary-chip` for tags/badges
+- Add subtle hover transitions to interactive cards
+- Use the existing color variables (var(--primary), var(--accent), etc.) instead of hardcoded colors
+- Ensure cards have `soft-card-hover` class for lift effect on hover
+- Use consistent spacing (gap-4, gap-6, p-4, p-6) instead of arbitrary values
+
+### Page-specific enhancements:
+
+**Home page (`page.tsx`):**
+- Make it feel like a "learning cockpit"
+- Stats overview cards should use `.soft-card` + hover effect
+- Feature grid cards should have subtle icon + clear CTA
+- "Continue learning" primary button should stand out
+- Recent activity section with clean list styling
+- Add visual hierarchy: overview → features → recent activity
+
+**Import page (`import/page.tsx`):**
+- Clear tab distinction between "Import Questions" and "Import Resume"
+- Upload area should have drag-drop visual feedback (dashed border, hover state)
+- Parse status flow should be clean and sequential
+- Results section should use cards for previews
+- Clear "next step" guidance after each action
+
+**Question list (`QuestionsPageClient.tsx`):**
+- Filter bar should use consistent chip styling
+- Question cards should be clean and scannable
+- Difficulty badges, domain tags, source badges should be unified
+- Pagination should sit cleanly at bottom
+- Empty/error/loading states should be centered and friendly
+
+**Question detail (`questions/[id]/page.tsx`):**
+- Layered presentation: question → source → knowledge → hints → explanation
+- Section dividers should be subtle
+- "Continue to next question" and "Start mock interview" CTAs should be prominent
+- Use `.soft-card` for each section block
+
+**Study page (`study/page.tsx`):**
+- Practice mode and review mode should be visually distinct tabs
+- Progress indicators should use the accent color
+- Question cards should feel actionable (want to click and practice)
+- Stats summary at top should use summary cards
+- Empty states should encourage action
+
+**Interview page (`interview/page.tsx`):**
+- Focused, immersive feel
+- Input area should be clean and prominent
+- Conversation history should have clear speaker distinction
+- Scoring and feedback should stand out but not be overwhelming
+- Progress through interview should be visible
+
+**Stats page (`stats/page.tsx`):**
+- Dashboard feel: metrics first
+- Charts should be clean and readable
+- Emphasize trends and improvement, not just numbers
+- Use accent color for positive trends, warning for areas needing attention
+- Cards should group related metrics
+
+## Critical Rules
+1. **INCREMENTAL ONLY** — Do NOT rewrite pages from scratch. Read each file, then make targeted edits.
+2. **NO INLINE STYLES** — Use existing CSS classes from globals.css wherever possible. Add new classes to globals.css only when truly needed.
+3. **DO NOT CHANGE FUNCTIONALITY** — Only visual/CSS changes. Don't change data fetching, API calls, or business logic.
+4. **DO NOT TOUCH** `layout.tsx` or `globals.css` unless you need to ADD new utility classes (not modify existing ones).
+5. **Tailwind only** — Do not introduce new CSS frameworks or libraries.
+6. **After all changes**: Run `npm run build` and ensure it passes with zero errors. Fix any issues iteratively.
+
+## Badge System
+Use these existing badge components consistently:
+- `SourceBadge` for question source (简历/AI/文本/文件)
+- Difficulty indicators: use chip colors — easy (green/success), medium (yellow/warning), hard (red/danger)
+- Domain tags: use primary-chip style
+- Question type: use secondary-chip style
+
+## Component Reuse Priority
+1. Existing globals.css classes (.soft-card, .page-title, .section-title, .primary-chip, etc.)
+2. Existing components (Pagination, LoadingState, EmptyState, ErrorState, SourceBadge, FilterBar)
+3. Tailwind utility classes for fine-tuning
+4. New CSS classes in globals.css (only if absolutely needed)

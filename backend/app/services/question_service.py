@@ -9,6 +9,7 @@ from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.domain.enums import QuestionType
 from app.domain.models import KnowledgeNode, Question, QuestionKnowledgeNode, QuestionTag, Tag
+from app.infra.cache.cache_service import TTL_QUESTION, get_cache, set_cache
 from app.infra.llm.gateway import llm_gateway
 from app.infra.repositories import KnowledgeNodeRepository, QuestionRepository, TagRepository
 from app.infra.vectorstore.pgvector_store import PGVectorStore
@@ -17,9 +18,23 @@ logger = get_logger(__name__)
 
 
 class QuestionService:
-    """Business logic for question CRUD, classification, and search."""
+    """题库与知识检索的业务服务层。
+
+    这个类负责把各种来源的数据（文件导入、简历解析、手动录入、
+    AI 生成）统一收敛为标准化题目记录。
+
+    它同时也是题库侧的 RAG 业务入口，主要职责包括：
+    - 创建题目
+    - 重新分类题目
+    - 打标签
+    - 关联知识节点
+    - 向量检索
+    - 文本/语义搜索
+    """
 
     def __init__(self, session: AsyncSession) -> None:
+        # DB session is the only thing this service needs to persist or load
+        # canonical question data.
         self.session = session
         self.question_repo = QuestionRepository(session)
         self.tag_repo = TagRepository(session)
@@ -29,13 +44,33 @@ class QuestionService:
     # ── CRUD ──────────────────────────────────────────────────────
 
     async def create_question(self, data: dict) -> Question:
-        """Create a new question, auto-computing content_hash."""
+        """Create a new question, auto-computing content_hash.
+
+        This is the canonical ingestion point for RAG/question records. Any
+        upstream parser, resume extractor, or manual form should converge here.
+        """
         content = data.get("content", "")
         content_hash = hashlib.sha256(content.encode()).hexdigest()
 
-        # Check duplicate
+        # Check cache for extraction result
+        cache_key = f"app:import:extract:{content_hash}"
+        cached = await get_cache(cache_key)
+        if cached is not None:
+            logger.info(f"Import extract cache HIT: {content_hash[:12]}...")
+            existing = await self.question_repo.list(filters={"content_hash": content_hash})
+            if existing:
+                return existing[0]
+
+        # Deduplicate by content hash to avoid re-importing the same question
+        # from different sources (resume, text import, manual input, etc.).
         existing = await self.question_repo.list(filters={"content_hash": content_hash})
         if existing:
+            logger.warning(
+                f"Global dedup hit: content_hash={content_hash[:12]}... "
+                f"returning existing question {existing[0].id}, "
+                f"attempted source_type={data.get('source_type')}, "
+                f"source_ref={data.get('source_ref')}"
+            )
             return existing[0]
 
         question = Question(
@@ -109,22 +144,26 @@ class QuestionService:
     async def list_questions_with_count(
         self,
         *,
+        user_id: str | None = None,
         query: str | None = None,
         domain_type: str | None = None,
         question_type: str | None = None,
         difficulty_level: int | None = None,
         source_type: str | None = None,
+        source_ref: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[Question], int]:
         """Return (items, total_count) using a real COUNT query."""
         offset = (page - 1) * page_size
         items, total = await self.question_repo.search_with_count(
+            user_id=user_id,
             query=query,
             domain_type=domain_type,
             question_type=question_type,
             difficulty_level=difficulty_level,
             source_type=source_type,
+            source_ref=source_ref,
             offset=offset,
             limit=page_size,
         )
@@ -148,7 +187,12 @@ class QuestionService:
     # ── Classification ────────────────────────────────────────────
 
     async def classify_question(self, question_id: UUID) -> dict:
-        """Re-classify an existing question via LLM."""
+        """Re-classify an existing question via LLM.
+
+        This is the point where the system enriches a plain question with
+        structure: domain, difficulty, type, tags, and (optionally) knowledge
+        nodes. The UI can then render richer study and interview experiences.
+        """
         question = await self.get_question(question_id)
 
         result = await llm_gateway.chat_json_with_prompt(
@@ -242,7 +286,11 @@ class QuestionService:
     # ── Vector search ─────────────────────────────────────────────
 
     async def semantic_search(self, query: str, *, top_k: int = 10) -> list[dict]:
-        """Search questions by semantic similarity using embeddings."""
+        """Search questions by semantic similarity using embeddings.
+
+        This is the RAG retrieval entrypoint for question discovery. It uses
+        the shared embedding model + pgvector store rather than ad-hoc queries.
+        """
         embeddings = await llm_gateway.embed([query])
         if not embeddings:
             return []

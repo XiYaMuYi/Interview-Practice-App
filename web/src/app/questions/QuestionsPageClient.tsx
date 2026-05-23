@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import axios from "axios";
 import QuestionCard from "@/components/QuestionCard";
-import LoadingState from "@/components/LoadingState";
-import EmptyState from "@/components/EmptyState";
-import ErrorState from "@/components/ErrorState";
-import Pagination from "@/components/Pagination";
+import { LoadingState, EmptyState, ErrorState } from "@/components/states";
+import { Pagination } from "@/components/pagination";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { usePagination } from "@/hooks/usePagination";
+import type { PaginatedData } from "@/hooks/usePaginatedQuery";
 
 interface Question {
   id: string;
@@ -19,19 +20,11 @@ interface Question {
   source_type?: string;
 }
 
-interface ListResponse {
-  items: Question[];
-  total: number;
-  page: number;
-  page_size: number;
-  total_pages: number;
-}
-
-const PAGE_SIZE_OPTIONS = [10, 20, 50];
+const PAGE_SIZE_OPTIONS = [10, 20, 30, 50];
 const DEFAULT_PAGE_SIZE = 20;
 
 const DOMAINS = [
-  "RAG", "Backend", "Frontend", "Database", "DevOps", "Algorithm", "ML",
+  "RAG检索增强", "Agent智能体", "LangGraph工作流", "LLM应用开发", "模型微调", "Prompt工程", "向量数据库", "多模态处理", "Text-to-SQL", "OCR文档解析", "MCP协议", "Function Calling", "vLLM部署", "FastAPI后端",
 ];
 
 const SOURCES: { value: string; label: string }[] = [
@@ -45,15 +38,8 @@ const SOURCES: { value: string; label: string }[] = [
 export default function QuestionsPageClient() {
   const searchParams = useSearchParams();
 
-  // Data
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Pagination
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  // Pagination state (source of truth for page/pageSize)
+  const pagination = usePagination({ initialPageSize: DEFAULT_PAGE_SIZE });
 
   // Search
   const [searchQuery, setSearchQuery] = useState("");
@@ -76,41 +62,72 @@ export default function QuestionsPageClient() {
     }
   }, [searchParams]);
 
-  // ── Fetch ───────────────────────────────────────────────────
+  // ── Build filters object for usePaginatedQuery ──────────────
 
-  const fetchQuestions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (searchQuery.trim()) {
-        const res = await axios.get<ListResponse>("/api/v1/questions/search", {
-          params: { q: searchQuery.trim(), limit: 100 },
-        });
-        setQuestions(res.data.items);
-        setTotal(res.data.total);
-      } else {
-        const params: Record<string, string | number> = {
-          page,
-          page_size: pageSize,
-        };
-        if (domainFilter) params.domain_type = domainFilter;
-        if (difficultyFilter) params.difficulty_level = parseInt(difficultyFilter, 10);
-        if (sourceFilter) params.source_type = sourceFilter;
+  const activeFilters = useMemo(() => {
+    const f: Record<string, string | number | boolean> = {};
+    if (domainFilter) f.domain_type = domainFilter;
+    if (difficultyFilter) f.difficulty_level = parseInt(difficultyFilter, 10);
+    if (sourceFilter) f.source_type = sourceFilter;
+    return f;
+  }, [domainFilter, difficultyFilter, sourceFilter]);
 
-        const res = await axios.get<ListResponse>("/api/v1/questions", { params });
-        setQuestions(res.data.items);
-        setTotal(res.data.total);
-      }
-    } catch {
-      setError("获取题目失败，请确保后端服务正在运行");
-    } finally {
-      setLoading(false);
-    }
-  }, [page, pageSize, searchQuery, domainFilter, difficultyFilter, sourceFilter]);
+  // ── usePaginatedQuery for the main list ─────────────────────
 
+  const isSearchMode = !!searchQuery.trim();
+
+  const {
+    data: questions,
+    loading,
+    error,
+    pagination: queryPagination,
+    refetch,
+  } = usePaginatedQuery<Question>({
+    url: "/api/v1/questions",
+    filters: activeFilters,
+    pageSize: pagination.state.pageSize,
+    enabled: !isSearchMode,
+    onDataTransform: (raw: PaginatedData<unknown>) => raw as PaginatedData<Question>,
+  });
+
+  // Sync pagination state from hook back to usePagination
   useEffect(() => {
-    fetchQuestions();
-  }, [fetchQuestions]);
+    if (queryPagination.total !== pagination.state.total) {
+      pagination.setTotal(queryPagination.total);
+    }
+  }, [queryPagination.total]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync page changes from usePagination -> usePaginatedQuery
+  useEffect(() => {
+    queryPagination.setPage(pagination.state.page);
+  }, [pagination.state.page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync pageSize changes from usePagination -> usePaginatedQuery
+  useEffect(() => {
+    queryPagination.setPageSize(pagination.state.pageSize);
+  }, [pagination.state.pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Search mode (separate, non-paginated) ───────────────────
+
+  const [searchResults, setSearchResults] = useState<Question[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  const doSearch = useCallback(async () => {
+    if (!searchQuery.trim()) return;
+    setSearchLoading(true);
+    setSearchError(null);
+    try {
+      const res = await axios.get("/api/v1/questions/search", {
+        params: { q: searchQuery.trim(), page_size: 100 },
+      });
+      setSearchResults(res.data.items);
+    } catch {
+      setSearchError("获取题目失败，请确保后端服务正在运行");
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [searchQuery]);
 
   // ── Handlers ────────────────────────────────────────────────
 
@@ -119,69 +136,87 @@ export default function QuestionsPageClient() {
     setDifficultyFilter("");
     setSourceFilter("");
     setResumeOnly(false);
+    pagination.resetPage();
   };
 
   const toggleResumeOnly = () => {
     const next = !resumeOnly;
     setResumeOnly(next);
     setSourceFilter(next ? "resume" : "");
-    setPage(1);
+    pagination.resetPage();
   };
 
   const handlePageChange = (newPage: number) => {
-    setPage(newPage);
+    pagination.setPage(newPage);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handlePageSizeChange = (newSize: number) => {
-    setPageSize(newSize);
-    setPage(1);
+    pagination.setPageSize(newSize);
+  };
+
+  const handleFilterChange = <T extends string>(
+    setter: (v: T) => void,
+    value: T,
+  ) => {
+    setter(value);
+    pagination.resetPage();
   };
 
   const hasActiveFilters = !!(domainFilter || difficultyFilter || sourceFilter || resumeOnly);
 
+  // ── Display data ────────────────────────────────────────────
+
+  const displayQuestions = isSearchMode ? searchResults : questions;
+  const displayLoading = isSearchMode ? searchLoading : loading;
+  const displayError = isSearchMode ? searchError : error;
+
   // ── Render ──────────────────────────────────────────────────
 
-  if (loading && questions.length === 0) {
+  if (displayLoading && displayQuestions.length === 0) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="page-frame">
         <LoadingState variant="skeleton" count={5} />
       </div>
     );
   }
 
-  if (error && questions.length === 0) {
+  if (displayError && displayQuestions.length === 0) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <ErrorState message={error} onRetry={fetchQuestions} />
+      <div className="page-frame">
+        <ErrorState message={displayError} onRetry={isSearchMode ? doSearch : refetch} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div className="page-frame">
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">
-          题目列表
-          <span className="ml-3 text-lg font-normal text-gray-500">
-            共 {total} 道
-          </span>
-        </h1>
+        <div>
+          <h1 className="page-title">
+            题目列表
+          </h1>
+          <p className="page-subtitle">
+            共 {isSearchMode ? searchResults.length : queryPagination.total} 道
+          </p>
+        </div>
         <Link
           href="/import"
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="btn-primary"
         >
           导入题目
         </Link>
       </div>
 
       {/* Search */}
-      <div className="bg-white rounded-lg shadow-sm border p-4 mb-4">
+      <div className="soft-card p-4 mb-4">
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            setPage(1);
-            fetchQuestions();
+            pagination.resetPage();
+            if (searchQuery.trim()) {
+              doSearch();
+            }
           }}
           className="flex gap-3"
         >
@@ -190,11 +225,11 @@ export default function QuestionsPageClient() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索题目标题或内容关键词…"
-            className="flex-1 border border-gray-300 rounded-md px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            className="form-input flex-1"
           />
           <button
             type="submit"
-            className="bg-blue-600 text-white px-6 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+            className="btn-primary"
           >
             搜索
           </button>
@@ -203,10 +238,9 @@ export default function QuestionsPageClient() {
               type="button"
               onClick={() => {
                 setSearchQuery("");
-                setPage(1);
-                fetchQuestions();
+                pagination.resetPage();
               }}
-              className="text-sm text-gray-600 hover:text-gray-800 transition-colors px-3"
+              className="btn-ghost"
             >
               清除
             </button>
@@ -215,13 +249,13 @@ export default function QuestionsPageClient() {
       </div>
 
       {/* Quick filters */}
-      <div className="bg-white rounded-lg shadow-sm border p-4 mb-4 flex gap-3 flex-wrap items-center">
+      <div className="soft-card p-4 mb-4 flex gap-3 flex-wrap items-center">
         <button
           onClick={toggleResumeOnly}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
             resumeOnly
-              ? "bg-rose-100 text-rose-700 border border-rose-200"
-              : "bg-gray-100 text-gray-600 border border-gray-200 hover:bg-gray-200"
+              ? "diff-5"
+              : "secondary-chip"
           }`}
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -232,16 +266,13 @@ export default function QuestionsPageClient() {
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-lg shadow-sm border p-4 mb-6 flex gap-4 flex-wrap items-center">
+      <div className="soft-card p-4 mb-6 flex gap-4 flex-wrap items-center">
         <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600">来源:</label>
+          <label className="text-sm text-slate-600">来源:</label>
           <select
             value={sourceFilter}
-            onChange={(e) => {
-              setSourceFilter(e.target.value);
-              setPage(1);
-            }}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            onChange={(e) => handleFilterChange(setSourceFilter, e.target.value)}
+            className="form-select"
           >
             <option value="">全部</option>
             {SOURCES.map((s) => (
@@ -253,14 +284,11 @@ export default function QuestionsPageClient() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600">领域:</label>
+          <label className="text-sm text-slate-600">领域:</label>
           <select
             value={domainFilter}
-            onChange={(e) => {
-              setDomainFilter(e.target.value);
-              setPage(1);
-            }}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            onChange={(e) => handleFilterChange(setDomainFilter, e.target.value)}
+            className="form-select"
           >
             <option value="">全部</option>
             {DOMAINS.map((d) => (
@@ -272,14 +300,11 @@ export default function QuestionsPageClient() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600">难度:</label>
+          <label className="text-sm text-slate-600">难度:</label>
           <select
             value={difficultyFilter}
-            onChange={(e) => {
-              setDifficultyFilter(e.target.value);
-              setPage(1);
-            }}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            onChange={(e) => handleFilterChange(setDifficultyFilter, e.target.value)}
+            className="form-select"
           >
             <option value="">全部</option>
             <option value="1">1 - 入门</option>
@@ -293,7 +318,7 @@ export default function QuestionsPageClient() {
         {hasActiveFilters && (
           <button
             onClick={clearFilters}
-            className="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+            className="btn-ghost"
           >
             清除筛选
           </button>
@@ -301,18 +326,18 @@ export default function QuestionsPageClient() {
       </div>
 
       {/* Error banner (inline, doesn't replace content) */}
-      {error && (
+      {displayError && (
         <div className="mb-4">
-          <ErrorState message={error} onRetry={fetchQuestions} />
+          <ErrorState message={displayError} onRetry={isSearchMode ? doSearch : refetch} />
         </div>
       )}
 
       {/* Questions list */}
-      {questions.length === 0 ? (
+      {displayQuestions.length === 0 ? (
         <EmptyState
-          title={hasActiveFilters ? "没有匹配的题目" : "暂无题目"}
+          title={hasActiveFilters || isSearchMode ? "没有匹配的题目" : "暂无题目"}
           description={
-            hasActiveFilters
+            hasActiveFilters || isSearchMode
               ? "尝试调整筛选条件，或导入新的题目"
               : "请先导入或添加题目"
           }
@@ -323,17 +348,17 @@ export default function QuestionsPageClient() {
       ) : (
         <div className="space-y-4">
           <div className="grid gap-4">
-            {questions.map((q) => (
+            {displayQuestions.map((q) => (
               <QuestionCard key={q.id} question={q} />
             ))}
           </div>
 
           {/* Pagination */}
-          {total > pageSize && !searchQuery && (
+          {!isSearchMode && queryPagination.total > pagination.state.pageSize && (
             <Pagination
-              currentPage={page}
-              pageSize={pageSize}
-              total={total}
+              currentPage={pagination.state.page}
+              pageSize={pagination.state.pageSize}
+              total={queryPagination.total}
               onPageChange={handlePageChange}
               onPageSizeChange={handlePageSizeChange}
               pageSizeOptions={PAGE_SIZE_OPTIONS}

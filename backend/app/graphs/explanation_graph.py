@@ -1,5 +1,13 @@
 """Explanation workflow graph — LangGraph state machine.
 
+This is the simplest linear workflow in the backend and is a good entry point
+for understanding how the agent graph is assembled.
+
+Reading order tip:
+- Read `states.py` first.
+- Then read this file to see a simple linear graph.
+- Then compare with `interview_graph.py` to see routing/branching.
+
 Flow: Extractor -> Classifier -> Explainer -> Persister
 
 Based on 04_LangGraph_Workflow.md phase 1 linear链路.
@@ -17,7 +25,13 @@ from app.graphs.nodes.interview_nodes import (
 
 
 def build_explanation_graph() -> StateGraph:
-    """Build and compile the explanation workflow graph."""
+    """构建并编译讲解工作流图。
+
+    这是一个最简化的线性图，适合作为理解 LangGraph 结构的起点：
+    输入 -> 分类 -> 讲解 -> 持久化
+
+    它不承担复杂分支控制，只负责把最基础的讲解闭环串起来。
+    """
     workflow = StateGraph(InterviewState)
 
     # Add nodes

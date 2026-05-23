@@ -50,6 +50,47 @@ interface ResumeParseResponse {
   error?: string;
 }
 
+const RESUME_STREAM_STORAGE_KEY = "resume_stream_progress";
+
+interface ResumeStreamPersistedState {
+  taskId: string | null;
+  resumeId: string;
+  phase: string | null;
+  message: string | null;
+  progress: number;
+  elapsed: number;
+  totalGenerated: number;
+  savedChunks: Array<{ type: string; label: string }>;
+}
+
+function loadPersistedResumeStream(): ResumeStreamPersistedState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(RESUME_STREAM_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveResumeStreamState(state: ResumeStreamPersistedState) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(RESUME_STREAM_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore quota exceeded
+  }
+}
+
+function clearResumeStreamState() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(RESUME_STREAM_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 const ALLOWED_TYPES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -113,10 +154,19 @@ export default function ImportPage() {
   const [resumeStreamQuestionsGenerated, setResumeStreamQuestionsGenerated] = useState(0);
   const [resumeStreamResumeId, setResumeStreamResumeId] = useState<string | null>(null);
   const resumeAbortRef = useRef<AbortController | null>(null);
+  const savedChunksRef = useRef<Array<{type: string, label: string}>>([]);
+
+  // ── File upload (questions tab) ──────────────────────────────────
+
+  const questionFileInputRef = useRef<HTMLInputElement>(null);
+  const [questionDragActive, setQuestionDragActive] = useState(false);
+  const [questionFileUploading, setQuestionFileUploading] = useState(false);
+  const [questionFileResult, setQuestionFileResult] = useState<ImportResult | null>(null);
+  const [questionFileError, setQuestionFileError] = useState<string | null>(null);
 
   // ── File upload (resume tab) ─────────────────────────────────────
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const resumeFileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<ResumeParseResponse | null>(null);
@@ -164,6 +214,153 @@ export default function ImportPage() {
     fetchResumes();
   }, [fetchResumes]);
 
+  // ── Page-load recovery: restore in-progress resume parse ─────────
+
+  const recoveryAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    // Only attempt recovery once per mount
+    if (recoveryAttemptedRef.current) return;
+
+    // Don't recover if already in progress or already done
+    if (resumeStreaming || resumeStreamDone) return;
+
+    const saved = loadPersistedResumeStream();
+    if (!saved || !saved.taskId) return;
+
+    recoveryAttemptedRef.current = true;
+    const controller = new AbortController();
+
+    const recover = async () => {
+      try {
+        const res = await fetch(`/api/v1/resumes/tasks/${saved.taskId}`, { signal: controller.signal });
+        if (!res.ok) {
+          clearResumeStreamState();
+          return;
+        }
+        const task = await res.json();
+
+        // Terminal states: clear localStorage, show nothing (user sees clean slate)
+        if (task.status === "done" || task.status === "success") {
+          clearResumeStreamState();
+          await fetchResumes();
+          return;
+        }
+
+        if (task.status === "failed") {
+          clearResumeStreamState();
+          return;
+        }
+
+        // Task is still running/processing — reconnect SSE
+        const restoredChunks = saved.savedChunks || [];
+        setResumeStreaming(true);
+        setResumeStreamProgress(task.progress || 0);
+        setResumeStreamPhase(task.current_phase || saved.phase || "parsing");
+        setResumeStreamMessage(saved.message || "正在恢复进度...");
+        setResumeStreamElapsed(0);
+        setResumeStreamDone(false);
+        setResumeStreamError(null);
+        setResumeStreamSavedChunks(restoredChunks);
+        savedChunksRef.current = [...restoredChunks];
+        setResumeStreamQuestionsGenerated(saved.totalGenerated || 0);
+        setResumeStreamResumeId(saved.resumeId);
+
+        // Reconnect SSE stream
+        const sseRes = await fetch(`/api/v1/resumes/${saved.resumeId}/parse-stream`, {
+          method: "POST",
+          signal: controller.signal,
+        });
+
+        if (!sseRes.ok || !sseRes.body) {
+          throw new Error("Recovery stream request failed");
+        }
+
+        const reader = sseRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let eventType = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              const dataStr = line.slice(5).trim();
+              if (dataStr && eventType) {
+                try {
+                  const data = JSON.parse(dataStr);
+                  if (data.progress != null) setResumeStreamProgress(data.progress);
+                  if (data.phase) setResumeStreamPhase(data.phase);
+                  if (data.current) setResumeStreamMessage(data.current);
+                  if (data.elapsed != null) setResumeStreamElapsed(Math.round(data.elapsed));
+
+                  if (eventType === "chunk_saved") {
+                    const chunk = { type: data.chunk_type || "section", label: data.label || data.chunk_type || "section" };
+                    setResumeStreamSavedChunks(prev => [...prev, chunk]);
+                    savedChunksRef.current = [...savedChunksRef.current, chunk];
+                  }
+
+                  // Persist progress after each event
+                  saveResumeStreamState({
+                    taskId: saved.taskId,
+                    resumeId: saved.resumeId,
+                    phase: data.phase || null,
+                    message: data.current || null,
+                    progress: data.progress ?? 0,
+                    elapsed: Math.round(data.elapsed ?? 0),
+                    totalGenerated: data.questions_generated ?? saved.totalGenerated,
+                    savedChunks: savedChunksRef.current,
+                  });
+
+                  if (eventType === "done") {
+                    setResumeStreamDone(true);
+                    setResumeStreamPhase("done");
+                    if (data.questions_generated != null) setResumeStreamQuestionsGenerated(data.questions_generated);
+                    clearResumeStreamState();
+                    await fetchResumes();
+                    break;
+                  } else if (eventType === "error") {
+                    setResumeStreamError(data.error || "解析失败");
+                    if (!data.recoverable) {
+                      setResumeStreamDone(true);
+                      clearResumeStreamState();
+                    }
+                    break;
+                  }
+                } catch {
+                  // ignore parse errors
+                }
+                eventType = "";
+              }
+            }
+          }
+        }
+      } catch (e: unknown) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setResumeStreamError("恢复进度失败，请重试");
+        setResumeStreamDone(true);
+        clearResumeStreamState();
+      } finally {
+        setResumeStreaming(false);
+        resumeAbortRef.current = null;
+      }
+    };
+
+    recover();
+
+    return () => {
+      controller.abort();
+    };
+  }, [fetchResumes]);
+
   // ── Text import ──────────────────────────────────────────────────
 
   const handleImport = async () => {
@@ -184,6 +381,64 @@ export default function ImportPage() {
       setLoading(false);
     }
   };
+
+  const handleQuestionFileUpload = async (file: File) => {
+    if (!isAllowedFile(file)) {
+      setQuestionFileError("不支持的文件类型，请上传 PDF、DOCX、TXT 或 MD 文件");
+      return;
+    }
+    setQuestionFileUploading(true);
+    setQuestionFileError(null);
+    setQuestionFileResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await axios.post("/api/v1/import/file", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setQuestionFileResult(res.data);
+    } catch (e: unknown) {
+      if (axios.isAxiosError(e)) {
+        setQuestionFileError(e.response?.data?.detail ?? "文件上传失败，请检查网络连接或后端服务状态");
+      } else {
+        setQuestionFileError("文件上传失败，请检查网络连接或后端服务状态");
+      }
+    } finally {
+      setQuestionFileUploading(false);
+    }
+  };
+
+  const handleQuestionDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setQuestionDragActive(false);
+      const file = e.dataTransfer.files[0];
+      if (file) handleQuestionFileUpload(file);
+    },
+    [handleQuestionFileUpload]
+  );
+
+  const handleQuestionDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setQuestionDragActive(true);
+  }, []);
+
+  const handleQuestionDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setQuestionDragActive(false);
+  }, []);
+
+  const handleQuestionFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) handleQuestionFileUpload(file);
+      e.target.value = "";
+    },
+    [handleQuestionFileUpload]
+  );
 
   const handleImportStream = async () => {
     if (!text.trim()) return;
@@ -375,6 +630,7 @@ export default function ImportPage() {
     setResumeStreamDone(false);
     setResumeStreamError(null);
     setResumeStreamSavedChunks([]);
+    savedChunksRef.current = [];
     setResumeStreamQuestionsGenerated(0);
     setResumeStreamResumeId(resumeId);
     setUploadError(null);
@@ -382,6 +638,8 @@ export default function ImportPage() {
 
     const controller = new AbortController();
     resumeAbortRef.current = controller;
+
+    let persistedTaskId: string | null = null;
 
     try {
       const res = await fetch(`/api/v1/resumes/${resumeId}/parse-stream`, {
@@ -416,26 +674,58 @@ export default function ImportPage() {
             if (dataStr && eventType) {
               try {
                 const data = JSON.parse(dataStr);
+
+                // Capture task_id from first event and persist it
+                if (!persistedTaskId && data.task_id) {
+                  persistedTaskId = data.task_id;
+                  saveResumeStreamState({
+                    taskId: data.task_id,
+                    resumeId,
+                    phase: "reading",
+                    message: "正在读取简历...",
+                    progress: 0,
+                    elapsed: 0,
+                    totalGenerated: 0,
+                    savedChunks: [],
+                  });
+                }
+
                 if (data.progress != null) setResumeStreamProgress(data.progress);
                 if (data.phase) setResumeStreamPhase(data.phase);
                 if (data.current) setResumeStreamMessage(data.current);
                 if (data.elapsed != null) setResumeStreamElapsed(Math.round(data.elapsed));
 
                 if (eventType === "chunk_saved") {
-                  setResumeStreamSavedChunks(prev => [
-                    ...prev,
-                    { type: data.chunk_type || "section", label: data.label || data.chunk_type || "section" },
-                  ]);
+                  const chunk = { type: data.chunk_type || "section", label: data.label || data.chunk_type || "section" };
+                  setResumeStreamSavedChunks(prev => [...prev, chunk]);
+                  savedChunksRef.current = [...savedChunksRef.current, chunk];
+                }
+
+                // Persist progress on each event
+                if (persistedTaskId) {
+                  saveResumeStreamState({
+                    taskId: persistedTaskId,
+                    resumeId,
+                    phase: data.phase || null,
+                    message: data.current || null,
+                    progress: data.progress ?? 0,
+                    elapsed: Math.round(data.elapsed ?? 0),
+                    totalGenerated: data.questions_generated ?? 0,
+                    savedChunks: savedChunksRef.current,
+                  });
                 }
 
                 if (eventType === "done") {
                   setResumeStreamDone(true);
                   setResumeStreamPhase("done");
                   if (data.questions_generated != null) setResumeStreamQuestionsGenerated(data.questions_generated);
+                  clearResumeStreamState();
+                  await fetchResumes();
                 } else if (eventType === "error") {
                   setResumeStreamError(data.error || "解析失败");
                   if (!data.recoverable) {
                     setResumeStreamDone(true);
+                    clearResumeStreamState();
                   }
                 }
               } catch {
@@ -458,9 +748,10 @@ export default function ImportPage() {
       setResumeStreaming(false);
       resumeAbortRef.current = null;
     }
-  }, []);
+  }, [fetchResumes]);
 
   const cancelResumeStream = () => {
+    clearResumeStreamState();
     resumeAbortRef.current?.abort();
   };
 
@@ -606,6 +897,8 @@ export default function ImportPage() {
                 setUploadError(null);
                 setCustomResult(null);
                 setCustomError(null);
+                setQuestionFileResult(null);
+                setQuestionFileError(null);
                 if (streaming) cancelStream();
                 setStreaming(false);
                 setStreamDone(false);
@@ -701,6 +994,93 @@ export default function ImportPage() {
                 清空
               </button>
             </div>
+          </div>
+
+          {/* ── File upload (questions tab) ───────────────── */}
+          <div className="soft-card p-6">
+            <h2 className="section-title mb-3">文档上传</h2>
+            <p className="text-sm text-slate-500 mb-4">支持 PDF、DOCX、TXT、MD 格式，AI 自动提取题目</p>
+
+            <div
+              onDrop={handleQuestionDrop}
+              onDragOver={handleQuestionDragOver}
+              onDragLeave={handleQuestionDragLeave}
+              className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
+                questionDragActive
+                  ? "border-cyan-400 bg-cyan-50"
+                  : "border-slate-300 hover:border-cyan-300 hover:bg-slate-50"
+              }`}
+              onClick={() => questionFileInputRef.current?.click()}
+            >
+              <svg
+                className="mx-auto h-10 w-10 text-slate-400 mb-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.5}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                />
+              </svg>
+              <p className="text-sm font-medium text-slate-700">
+                拖放文件到这里，或 <span className="text-cyan-600">点击选择</span>
+              </p>
+              <p className="text-xs text-slate-400 mt-1">.pdf .docx .txt .md</p>
+            </div>
+            <input
+              ref={questionFileInputRef}
+              type="file"
+              accept=".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
+              className="hidden"
+              onChange={handleQuestionFileSelect}
+              disabled={questionFileUploading}
+            />
+
+            {/* Upload error */}
+            {questionFileError && (
+              <div className="mt-4 flex items-center gap-2 text-sm text-red-600">
+                <svg className="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+                {questionFileError}
+              </div>
+            )}
+
+            {/* Upload loading */}
+            {questionFileUploading && (
+              <div className="mt-4 flex items-center gap-3">
+                <svg className="animate-spin h-5 w-5 text-cyan-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <span className="text-sm text-slate-600">正在解析文档并提取题目...</span>
+              </div>
+            )}
+
+            {/* Upload success */}
+            {questionFileResult && (
+              <div className="mt-4 success-banner">
+                <div className="flex items-center gap-2">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="font-semibold">导入成功</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm mt-3">
+                  <div>
+                    <span className="text-slate-500">提取题目</span>
+                    <p className="font-semibold text-lg text-green-600">{questionFileResult.questions_extracted} 道</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">知识节点</span>
+                    <p className="font-semibold text-lg text-cyan-600">{questionFileResult.knowledge_nodes} 个</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── Streaming progress UI ──────────────────────────── */}
@@ -980,7 +1360,7 @@ export default function ImportPage() {
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => resumeFileInputRef.current?.click()}
               className={`
                 relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer
                 transition-all duration-200
@@ -993,7 +1373,7 @@ export default function ImportPage() {
               `}
             >
               <input
-                ref={fileInputRef}
+                ref={resumeFileInputRef}
                 type="file"
                 accept=".pdf,.docx,.txt,.md"
                 onChange={handleFileSelect}
@@ -1182,9 +1562,11 @@ export default function ImportPage() {
               <p className="text-sm text-gray-600 mb-4">{resumeStreamError}</p>
               <button
                 onClick={() => {
+                  clearResumeStreamState();
                   setResumeStreamDone(false);
                   setResumeStreamError(null);
                   setResumeStreamSavedChunks([]);
+                  savedChunksRef.current = [];
                   setResumeStreamQuestionsGenerated(0);
                   setResumeStreamResumeId(null);
                 }}

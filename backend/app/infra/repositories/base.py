@@ -177,11 +177,13 @@ class QuestionRepository(BaseRepository["Question"]):
     async def search_with_count(
         self,
         *,
+        user_id: str | None = None,
         query: str | None = None,
         domain_type: str | None = None,
         question_type: str | None = None,
         difficulty_level: int | None = None,
         source_type: str | None = None,
+        source_ref: str | None = None,
         offset: int = 0,
         limit: int = 50,
     ) -> tuple[Sequence[Question], int]:
@@ -190,6 +192,8 @@ class QuestionRepository(BaseRepository["Question"]):
 
         # Build the base filter conditions
         conditions = [self.model.deleted_at.is_(None)]
+        if user_id is not None:
+            conditions.append(self.model.user_id == user_id)
         if query:
             conditions.append(
                 or_(
@@ -205,6 +209,8 @@ class QuestionRepository(BaseRepository["Question"]):
             conditions.append(self.model.difficulty_level == difficulty_level)
         if source_type:
             conditions.append(self.model.source_type == source_type)
+        if source_ref:
+            conditions.append(self.model.source_ref == source_ref)
 
         # Count query
         count_stmt = select(func.count()).select_from(self.model).where(*conditions)
@@ -275,7 +281,7 @@ class StudyRecordRepository(BaseRepository["StudyRecord"]):
         total = (await self.session.exec(count_stmt)).scalar_one()
         data_stmt = data_stmt.offset(offset).limit(limit).order_by(self.model.created_at.desc())
         result = await self.session.exec(data_stmt)
-        return result.all(), total
+        return list(result.scalars().all()), total
 
 
 class ChatHistoryRepository(BaseRepository["ChatHistory"]):
@@ -301,7 +307,7 @@ class FileRepository(BaseRepository["File"]):
     async def get_by_hash(self, file_hash: str) -> File | None:
         stmt = select(self.model).where(self.model.file_hash == file_hash)
         result = await self.session.exec(stmt)
-        return result.first()
+        return result.scalars().first()
 
 
 class QuestionEmbeddingRepository(BaseRepository["QuestionEmbedding"]):

@@ -86,3 +86,4 @@ class ResumeParseResponse(BaseModel):
     experiences_count: int = 0
     model_version: str | None = None
     prompt_version: str | None = None
+    error: str | None = None

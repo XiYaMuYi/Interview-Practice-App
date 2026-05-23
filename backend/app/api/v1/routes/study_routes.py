@@ -3,12 +3,16 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy import func, select
 
 from app.api.deps import DbSession
 from app.common.pagination import build_paginated_response
 from app.domain.schemas import (
+    LearningPathRequest,
     ReviewListItem,
     ReviewListResponse,
+    ReviewReportRequest,
     ReviewRequest,
     StudyRecordResponse,
     StudySessionCreate,
@@ -19,13 +23,23 @@ from app.services.study_service import StudyService
 router = APIRouter()
 
 
+def _study_record_response(record: dict) -> StudyRecordResponse:
+    """Normalize service output before FastAPI response validation."""
+    record_data = dict(record)
+    if record_data.get("created_at") is None:
+        record_data["created_at"] = record_data.get("reviewed_at")
+    if record_data.get("reviewed_at") is None:
+        record_data["reviewed_at"] = record_data.get("created_at")
+    return StudyRecordResponse.model_validate(record_data)
+
+
 @router.post("/records", response_model=StudyRecordResponse)
 async def create_study_record(session: DbSession, data: StudySessionCreate):
     """Record a study session."""
     service = StudyService(session)
     record_data = data.model_dump()
     record = await service.create_study_record(record_data)
-    return record
+    return _study_record_response(record)
 
 
 @router.get("/records")
@@ -70,7 +84,7 @@ async def record_review(session: DbSession, data: ReviewRequest):
         user_answer=data.user_answer,
         duration=data.duration_seconds,
     )
-    return record
+    return _study_record_response(record)
 
 
 @router.get("/review-list")
@@ -100,3 +114,51 @@ async def get_study_stats(session: DbSession):
     service = StudyService(session)
     stats = await service.get_stats()
     return StudyStatsResponse(**stats)
+
+
+@router.get("/stats/by-source")
+async def get_stats_by_source(session: DbSession):
+    """Get study statistics breakdown by question source type."""
+    from app.domain.models import Question, StudyRecord
+
+    stmt = (
+        select(Question.source_type, func.count(func.distinct(StudyRecord.question_id)))
+        .join(StudyRecord, StudyRecord.question_id == Question.id)
+        .where(Question.deleted_at.is_(None))
+        .group_by(Question.source_type)
+    )
+    result = await session.exec(stmt)
+    breakdown = {row[0] or "unknown": row[1] for row in result.all()}
+    return breakdown
+
+
+@router.post("/review-report/generate-stream")
+async def generate_review_report_stream(session: DbSession, data: ReviewReportRequest):
+    """Generate a review report via SSE stream."""
+    service = StudyService(session)
+    task_id, event_gen = await service.generate_review_report_stream(
+        session_id=data.session_id,
+        days=data.days,
+        include_feedback=data.include_feedback,
+    )
+    return StreamingResponse(
+        event_gen,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+@router.post("/learning-path/generate-stream")
+async def generate_learning_path_stream(session: DbSession, data: LearningPathRequest):
+    """Generate a learning path via SSE stream."""
+    service = StudyService(session)
+    task_id, event_gen = await service.generate_learning_path_stream(
+        focus_areas=data.focus_areas,
+        max_items=data.max_items,
+        strategy=data.strategy,
+    )
+    return StreamingResponse(
+        event_gen,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )

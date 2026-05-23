@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import axios from "axios";
+import { useTaskEvents } from "@/hooks/useTaskEvents";
 
 interface TagInfo {
   tag_name: string | null;
@@ -81,11 +82,11 @@ const difficultyText = (level: number | null) => {
 const difficultyColor = (level: number | null) => {
   if (level == null) return "bg-gray-100 text-gray-600";
   const map: Record<number, string> = {
-    1: "bg-green-100 text-green-700",
-    2: "bg-lime-100 text-lime-700",
-    3: "bg-yellow-100 text-yellow-700",
-    4: "bg-orange-100 text-orange-700",
-    5: "bg-red-100 text-red-700",
+    1: "diff-1",
+    2: "diff-2",
+    3: "diff-3",
+    4: "diff-4",
+    5: "diff-5",
   };
   return map[level] || "bg-gray-100 text-gray-600";
 };
@@ -173,6 +174,12 @@ export default function QuestionDetailPage() {
   const [generateDepth, setGenerateDepth] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
+  // 流式生成状态
+  const [streamingTaskId, setStreamingTaskId] = useState<string | null>(null);
+  const [streamingDepth, setStreamingDepth] = useState<string | null>(null);
+  const [streamingError, setStreamingError] = useState<string | null>(null);
+  const [streamingComplete, setStreamingComplete] = useState(false);
+
   useEffect(() => {
     async function fetch() {
       try {
@@ -211,9 +218,49 @@ export default function QuestionDetailPage() {
     }
   };
 
+  // useTaskEvents hook for streaming — auto-connects when streamingTaskId is set
+  const {
+    accumulatedContent,
+    currentPhase: streamPhase,
+    progress: streamProgress,
+    status: streamStatus,
+    isConnected: streamConnected,
+    reset: resetStream,
+  } = useTaskEvents(streamingTaskId, {
+    onDone: () => {
+      setStreamingComplete(true);
+      if (accumulatedContent) {
+        setGeneratedExplanation(accumulatedContent);
+      }
+    },
+  });
+
+  const handleGenerateStream = async (depth: "brief" | "standard" | "deep") => {
+    resetStream();
+    setStreamingTaskId(null);
+    setStreamingError(null);
+    setStreamingComplete(false);
+    setStreamingDepth(depth);
+    setGeneratedExplanation(null);
+    try {
+      const res = await axios.post(`/api/v1/ai/explain-stream`, {
+        question_id: id,
+        depth,
+      });
+      const taskId = res.data.task_id;
+      if (!taskId) {
+        setStreamingError("未获取到任务ID，流式生成启动失败");
+        return;
+      }
+      setStreamingTaskId(taskId);
+    } catch {
+      setStreamingError("启动流式生成失败，请检查网络连接或后端服务状态");
+    }
+  };
+
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-12 text-center text-gray-500">
+      <div className="max-w-4xl mx-auto px-4 py-12 text-center text-slate-500">
         加载中...
       </div>
     );
@@ -226,7 +273,7 @@ export default function QuestionDetailPage() {
         <div className="mt-4">
           <Link
             href="/questions"
-            className="text-blue-600 hover:underline"
+            className="text-sky-600 hover:underline"
           >
             返回列表
           </Link>
@@ -240,36 +287,36 @@ export default function QuestionDetailPage() {
       {/* Back button */}
       <button
         onClick={() => router.back()}
-        className="mb-6 text-sm text-gray-600 hover:text-gray-900 transition-colors flex items-center gap-1"
+        className="btn-ghost mb-6"
       >
         &larr; 返回列表
       </button>
 
       {/* Header */}
-      <h1 className="text-2xl font-bold text-gray-900 mb-4">
+      <h1 className="page-title mb-4">
         {detail.title || "无标题"}
       </h1>
 
       {/* Meta badges */}
       <div className="flex flex-wrap gap-2 mb-6">
-        <span className="px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700">
+        <span className="secondary-chip">
           {typeLabel(detail.question_type)}
         </span>
-        <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700">
+        <span className="primary-chip">
           {domainLabel(detail.domain_type)}
         </span>
         <span
-          className={`px-2 py-1 rounded text-xs font-medium ${difficultyColor(detail.difficulty_level)}`}
+          className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${difficultyColor(detail.difficulty_level)}`}
         >
           {difficultyText(detail.difficulty_level)}
         </span>
         {detail.difficulty_score != null && (
-          <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600">
+          <span className="secondary-chip">
             评分 {detail.difficulty_score.toFixed(1)}
           </span>
         )}
         {detail.review_status && (
-          <span className="px-2 py-1 rounded text-xs font-medium bg-indigo-100 text-indigo-700">
+          <span className="primary-chip">
             {detail.review_status}
           </span>
         )}
@@ -277,33 +324,33 @@ export default function QuestionDetailPage() {
 
       {/* Content */}
       {detail.content && (
-        <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">题目内容</h2>
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-4">题目内容</h2>
           <MarkdownContent text={detail.content} />
         </section>
       )}
 
       {/* Source info */}
       {(detail.source_type || detail.source_ref || detail.source_excerpt) && (
-        <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">来源信息</h2>
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-3">来源信息</h2>
           <dl className="space-y-2 text-sm">
             {detail.source_type && (
               <div className="flex gap-2">
-                <dt className="text-gray-500 w-24 shrink-0">来源类型</dt>
-                <dd className="text-gray-800">{detail.source_type}</dd>
+                <dt className="text-slate-500 w-24 shrink-0">来源类型</dt>
+                <dd className="text-slate-800">{detail.source_type}</dd>
               </div>
             )}
             {detail.source_ref && (
               <div className="flex gap-2">
-                <dt className="text-gray-500 w-24 shrink-0">来源引用</dt>
-                <dd className="text-gray-800">{detail.source_ref}</dd>
+                <dt className="text-slate-500 w-24 shrink-0">来源引用</dt>
+                <dd className="text-slate-800">{detail.source_ref}</dd>
               </div>
             )}
             {detail.source_excerpt && (
               <div className="flex gap-2">
-                <dt className="text-gray-500 w-24 shrink-0">原文摘录</dt>
-                <dd className="text-gray-800 italic">{detail.source_excerpt}</dd>
+                <dt className="text-slate-500 w-24 shrink-0">原文摘录</dt>
+                <dd className="text-slate-600 italic">{detail.source_excerpt}</dd>
               </div>
             )}
           </dl>
@@ -312,16 +359,16 @@ export default function QuestionDetailPage() {
 
       {/* Tags */}
       {detail.tags.length > 0 && (
-        <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">标签</h2>
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-3">标签</h2>
           <div className="flex flex-wrap gap-2">
             {detail.tags.map((t, i) => (
               <span
                 key={i}
-                className="px-3 py-1 bg-gray-100 text-gray-700 rounded text-sm"
+                className="secondary-chip"
               >
                 {t.tag_name}
-                {t.tag_type && <span className="text-gray-400 ml-1">({t.tag_type})</span>}
+                {t.tag_type && <span className="text-slate-400 ml-1">({t.tag_type})</span>}
               </span>
             ))}
           </div>
@@ -330,17 +377,17 @@ export default function QuestionDetailPage() {
 
       {/* Knowledge nodes */}
       {detail.knowledge_nodes.length > 0 && (
-        <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">知识节点</h2>
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-3">知识节点</h2>
           <div className="flex flex-wrap gap-2">
             {detail.knowledge_nodes.map((n, i) => (
               <span
                 key={i}
-                className="px-3 py-1 bg-teal-50 text-teal-700 rounded text-sm"
+                className="primary-chip"
               >
                 {n.node_name}
                 {n.relation_type && (
-                  <span className="text-teal-400 ml-1">[{n.relation_type}]</span>
+                  <span className="text-sky-400 ml-1">[{n.relation_type}]</span>
                 )}
               </span>
             ))}
@@ -350,76 +397,137 @@ export default function QuestionDetailPage() {
 
       {/* Answer summary */}
       {detail.answer_summary && (
-        <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">答案摘要</h2>
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-3">答案摘要</h2>
           <MarkdownContent text={detail.answer_summary} />
         </section>
       )}
 
       {/* Answer detail */}
       {detail.answer_detail && (
-        <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">详细答案</h2>
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-3">详细答案</h2>
           <MarkdownContent text={detail.answer_detail} />
         </section>
       )}
 
       {/* Explanation */}
       {detail.explanation && (
-        <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">讲解</h2>
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-3">讲解</h2>
           <MarkdownContent text={detail.explanation} />
         </section>
       )}
 
       {/* Common pitfalls */}
       {detail.common_pitfalls && (
-        <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">常见误区</h2>
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-3">常见误区</h2>
           <MarkdownContent text={detail.common_pitfalls} />
         </section>
       )}
 
       {/* Generate explanation button group */}
-      <section className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">AI 讲解</h2>
+      <section className="soft-card p-6 mb-6">
+        <h2 className="section-title mb-4">AI 讲解</h2>
+        <p className="text-sm text-slate-500 mb-3">同步生成</p>
         <div className="flex flex-wrap gap-3 mb-4">
           {([
             { value: "brief", label: "简要" },
             { value: "standard", label: "标准" },
             { value: "deep", label: "深入" },
-          ] as const).map(({ value, label }) => (
-            <button
-              key={value}
-              onClick={() => handleGenerate(value)}
-              disabled={generating}
-              className={`px-5 py-2 rounded-lg font-medium transition-colors ${
-                generateDepth === value && generating
-                  ? "bg-blue-600 text-white opacity-50"
-                  : generateDepth === value
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              } disabled:cursor-not-allowed`}
-            >
-              {generateDepth === value && generating ? "生成中..." : label}
-            </button>
-          ))}
+          ] as const).map(({ value, label }) => {
+            const isActive = generateDepth === value && generating;
+            const isSelected = generateDepth === value;
+            return (
+              <button
+                key={value}
+                onClick={() => handleGenerate(value)}
+                disabled={generating}
+                className={isActive || isSelected ? "btn-primary" : "btn-secondary"}
+              >
+                {isActive ? "生成中..." : label}
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="text-sm text-slate-500 mb-3">流式生成（实时输出）</p>
+        <div className="flex flex-wrap gap-3 mb-4">
+          {([
+            { value: "brief", label: "简要" },
+            { value: "standard", label: "标准" },
+            { value: "deep", label: "深入" },
+          ] as const).map(({ value, label }) => {
+            const isStreaming = streamingDepth === value && streamConnected && !streamingComplete;
+            const isDone = streamingDepth === value && streamingComplete;
+            return (
+              <button
+                key={`stream-${value}`}
+                onClick={() => handleGenerateStream(value)}
+                disabled={isStreaming}
+                className={isStreaming || isDone ? "btn-primary" : "btn-secondary"}
+              >
+                {isStreaming ? "流式中..." : isDone ? "已完成" : label}
+              </button>
+            );
+          })}
         </div>
 
         {generateError && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          <div className="error-banner">
             {generateError}
+          </div>
+        )}
+        {streamingError && (
+          <div className="error-banner">
+            {streamingError}
+          </div>
+        )}
+
+        {/* Streaming output area */}
+        {streamingTaskId && (
+          <div className="mt-4 p-4 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-medium text-slate-700">
+                实时输出
+                {streamPhase && <span className="text-slate-400 ml-2">阶段: {streamPhase}</span>}
+              </span>
+              {!streamingComplete && streamConnected && (
+                <span className="text-xs text-slate-400 animate-pulse">流式中...</span>
+              )}
+              {streamingComplete && (
+                <span className="text-xs text-green-600">完成</span>
+              )}
+            </div>
+            {/* Progress bar */}
+            <div className="w-full bg-slate-200 rounded-full h-1.5 mb-3">
+              <div
+                className="bg-sky-500 h-1.5 rounded-full transition-all duration-300"
+                style={{ width: `${Math.max(0, Math.min(100, (streamProgress ?? 0) * 100))}%` }}
+              />
+            </div>
+            {/* Accumulated content */}
+            {accumulatedContent ? (
+              <div className="whitespace-pre-wrap text-sm text-slate-800 max-h-96 overflow-y-auto p-3 bg-white rounded border border-slate-100">
+                <MarkdownContent text={accumulatedContent} />
+              </div>
+            ) : (
+              <div className="text-sm text-slate-400 text-center py-4">
+                等待输出...
+              </div>
+            )}
           </div>
         )}
       </section>
 
       {/* Generated explanation */}
       {generatedExplanation && (
-        <section className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-semibold text-blue-900 mb-3">
+        <section className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-3">
             AI 讲解
             {generateDepth && (
-              <span className="ml-2 text-sm font-normal text-blue-600">
+              <span className="section-hint">
                 （{generateDepth === "brief" ? "简要" : generateDepth === "standard" ? "标准" : "深入"}）
               </span>
             )}

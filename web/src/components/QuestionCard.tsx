@@ -52,27 +52,20 @@ const difficultyText = (level: number | null) => {
   return map[level] || `${level}`;
 };
 
-const difficultyColor = (level: number | null) => {
-  if (level == null) return "bg-gray-100 text-gray-600";
-  const map: Record<number, string> = {
-    1: "bg-green-100 text-green-700",
-    2: "bg-lime-100 text-lime-700",
-    3: "bg-yellow-100 text-yellow-700",
-    4: "bg-orange-100 text-orange-700",
-    5: "bg-red-100 text-red-700",
-  };
-  return map[level] || "bg-gray-100 text-gray-600";
+const difficultyDiffClass = (level: number | null) => {
+  if (level == null || level < 1 || level > 5) return "secondary-chip";
+  return `diff-${level}`;
 };
 
 export default function QuestionCard({ question }: QuestionCardProps) {
   return (
     <Link
       href={`/questions/${question.id}`}
-      className="block bg-white rounded-lg shadow-sm border p-5 hover:shadow-md hover:border-blue-300 transition-all"
+      className="block soft-card soft-card-hover p-5"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-semibold text-gray-900 truncate">
+          <h2 className="text-lg font-semibold text-slate-900 truncate">
             {question.title || "无标题"}
           </h2>
         </div>
@@ -80,15 +73,13 @@ export default function QuestionCard({ question }: QuestionCardProps) {
           {question.source_type && (
             <SourceBadge source={question.source_type} />
           )}
-          <span className="px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700">
+          <span className="secondary-chip">
             {typeLabel(question.question_type)}
           </span>
-          <span className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700">
+          <span className="primary-chip">
             {domainLabel(question.domain_type)}
           </span>
-          <span
-            className={`px-2 py-1 rounded text-xs font-medium ${difficultyColor(question.difficulty_level)}`}
-          >
+          <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${difficultyDiffClass(question.difficulty_level)}`}>
             {difficultyText(question.difficulty_level)}
           </span>
         </div>

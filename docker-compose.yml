@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: interview_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: interview_practice
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker-data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d interview_practice"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

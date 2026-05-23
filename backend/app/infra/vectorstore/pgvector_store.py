@@ -16,9 +16,15 @@ class VectorStoreError(Exception):
 
 
 class PGVectorStore:
-    """Thin wrapper around pgvector for similarity search on question_embeddings.
+    """pgvector 的薄封装。
 
-    Uses raw SQL to avoid ORM complexity of querying vector columns.
+    这是后端最底层的向量检索组件，职责非常纯粹：
+    - 存储向量
+    - 查询相似向量
+    - 删除向量
+
+    它不关心题目业务、不关心 UI、不关心流程，只负责向量层的
+    数据访问。上层的业务规则由 `QuestionService` 或更高层服务来决定。
     """
 
     def __init__(self, session: AsyncSession) -> None:

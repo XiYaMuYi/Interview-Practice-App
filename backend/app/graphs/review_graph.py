@@ -1,5 +1,9 @@
 """Review workflow graph — LangGraph state machine for SM-2 review scheduling.
 
+This graph is the spaced-repetition side of the backend. Read it after
+`states.py` and the interview graphs so you can see how mastery and review
+scheduling are derived from learning performance.
+
 Flow: LoadQuestion -> Evaluate -> ScheduleReview -> Persist
 
 Based on 04_LangGraph_Workflow.md — simplified SM-2 review scheduling.
@@ -21,9 +25,17 @@ INITIAL_INTERVAL_DAYS = 1
 
 
 async def load_question_node(state: dict) -> dict:
-    """Load question context for review.
+    """加载复习所需的题目上下文。
 
-    Reads question_id, outputs question_text and context.
+    这个节点的职责是：
+    - 确认当前复习对象是否存在
+    - 读取题目 ID 或题目文本
+    - 为后续复习评价节点准备基础状态
+
+    当前版本还比较轻量，后续可以扩展为：
+    - 直接从数据库加载题目详情
+    - 加载上一次复习记录
+    - 加载学习画像信息
     """
     question_id = state.get("question_id", "")
     question_text = state.get("question_text", "")
@@ -38,12 +50,22 @@ async def load_question_node(state: dict) -> dict:
 
 
 async def review_evaluator_node(state: dict) -> dict:
-    """Evaluate user's review attempt using quality score.
+    """根据质量评分评估这次复习结果。
 
-    Reads user_answer, quality (0-5), outputs mastery_level and review_interval.
-    SM-2 simplified:
-    - quality >= 3 (correct): interval = interval * 2 (initial 1 day)
-    - quality < 3 (wrong): interval resets to 1 day
+    这里使用的是简化版 SM-2 思路：
+    - 质量分高，复习间隔延长
+    - 质量分低，复习间隔重置
+
+    输入：
+    - user_score / quality：用户自评或系统评分
+    - mastery_level：当前掌握度
+    - metadata：保存间隔天数等中间信息
+
+    输出：
+    - mastery_level：更新后的掌握度
+    - review_needed：是否需要继续复习
+    - _next_review_at：下一次复习时间
+    - _review_result：本次复习结果标签
     """
     quality = state.get("user_score", 0)  # Reuse user_score as quality 0-5 scale
     if quality > 5:
@@ -82,7 +104,11 @@ async def review_evaluator_node(state: dict) -> dict:
 
 
 async def schedule_review_node(state: dict) -> dict:
-    """Calculate and set the next review date."""
+    """计算并设置下一次复习时间。
+
+    这个节点的作用是把评价结果翻译成“什么时候再练”的具体时间。
+    它并不负责真正写数据库，而是把要持久化的信息整理好。
+    """
     next_review_str = state.get("_next_review_at", "")
     review_result = state.get("_review_result", "unknown")
 
@@ -99,7 +125,12 @@ async def schedule_review_node(state: dict) -> dict:
 
 
 async def review_persister_node(state: dict) -> dict:
-    """Mark the review result for persistence."""
+    """标记复习结果，交给服务层执行真正的持久化。
+
+    这里仍然遵守同一个原则：
+    - node 负责流程状态
+    - service / repository 负责真正的数据库写入
+    """
     return {
         "persist_flag": True,
         "next_action": "save",

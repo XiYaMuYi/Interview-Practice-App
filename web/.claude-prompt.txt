@@ -1,0 +1,38 @@
+You are a frontend engineer. Fix and complete the pagination module for this project.
+
+BACKGROUND:
+The project has a unified pagination architecture defined in readme/09_Pagination_Module_Architecture.md and readme/10_Backend_Pagination_Interface_Spec.md.
+The pagination module has base files created but has compilation errors and pages are not yet using the hooks.
+
+TASKS:
+
+1. Fix TypeScript type bug in src/hooks/usePaginatedQuery.ts. The line "params[key] = value" causes:
+   Type 'string | number | boolean' is not assignable to type 'string | number'.
+   Fix: Change the params type declaration from Record<string, string | number> to Record<string, string | number | boolean> so that boolean values are accepted.
+
+2. Check and complete the pagination module per architecture doc 09:
+   - src/components/filters/FilterBar.tsx is MISSING - create it
+     It should be a filter bar component that supports:
+     - A search input field
+     - Display of active filter tags/chips
+     - A "clear all" button
+     - Clean, minimal styling consistent with the rest of the project
+
+3. Migrate three pages from raw axios + manual state to usePaginatedQuery hook:
+   - src/app/questions/QuestionsPageClient.tsx
+   - src/app/stats/page.tsx
+   - src/app/study/page.tsx
+
+   After migration these pages should:
+   - Use usePaginatedQuery instead of manual axios calls + useState for data/loading/error
+   - Use usePagination for page state management
+   - Filter changes auto-reset to page 1
+   - Keep existing UI and functionality exactly the same
+
+4. Run "npm run build" to verify compilation passes. Fix any remaining errors iteratively.
+
+RULES:
+- Do not delete existing functionality, only migrate and complete
+- Keep UI appearance unchanged
+- All paginated pages behave consistently
+- Do not modify backend code

@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useCallback } from "react";
+
 type ErrorCategory = "network" | "backend" | "model" | "parse" | "auth" | "unknown";
 
 interface ErrorStateProps {
@@ -36,9 +38,20 @@ export default function ErrorState({
   onRetry,
   detail,
 }: ErrorStateProps) {
+  const [isRetrying, setIsRetrying] = useState(false);
   const cat = category ?? detectCategory(message);
   const config = categoryConfig[cat];
   const displayTitle = title ?? config.title;
+
+  const handleClick = useCallback(async () => {
+    if (!onRetry || isRetrying) return;
+    setIsRetrying(true);
+    try {
+      await Promise.resolve(onRetry());
+    } finally {
+      setIsRetrying(false);
+    }
+  }, [onRetry, isRetrying]);
 
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
@@ -56,10 +69,11 @@ export default function ErrorState({
       )}
       {onRetry && (
         <button
-          onClick={onRetry}
-          className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+          onClick={handleClick}
+          disabled={isRetrying}
+          className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          重试
+          {isRetrying ? "重试中..." : "重试"}
         </button>
       )}
     </div>

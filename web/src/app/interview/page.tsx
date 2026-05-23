@@ -2,8 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import axios from "axios";
-import EmptyState from "@/components/EmptyState";
-import LoadingState from "@/components/LoadingState";
+import { EmptyState, LoadingState } from "@/components/states";
 import TaskStatusBadge from "@/components/TaskStatusBadge";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -45,7 +44,8 @@ interface ResumeItem {
 type Phase = "setup" | "interview" | "done";
 type InterviewMode = "general" | "resume";
 
-const domains = ["RAG", "Backend", "Frontend", "Database", "DevOps", "Algorithm", "ML"];
+const LLM_MODEL = process.env.NEXT_PUBLIC_LLM_MODEL ?? "qwen3-vl-plus";
+const domains = ["RAG检索增强", "Agent智能体", "LangGraph工作流", "LLM应用开发", "模型微调", "Prompt工程", "向量数据库", "多模态处理", "Text-to-SQL", "OCR文档解析", "MCP协议", "Function Calling", "vLLM部署", "FastAPI后端"];
 const difficulties = [
   { value: "easy", label: "简单" },
   { value: "medium", label: "中等" },
@@ -141,7 +141,7 @@ export default function InterviewPage() {
     try {
       const res = await axios.post<AnswerResponse>("/api/v1/ai/interview/answer", {
         session_id: sessionId,
-        user_answer: userAnswer.trim(),
+        answer: userAnswer.trim(),
       });
 
       const newTurn = {
@@ -220,31 +220,31 @@ export default function InterviewPage() {
 
   if (phase === "setup") {
     return (
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">模拟面试</h1>
-        <p className="text-gray-600 mb-8">选择领域和难度，开始沉浸式 AI 面试体验</p>
+      <div className="page-frame-tight">
+        <h1 className="page-title">模拟面试</h1>
+        <p className="page-subtitle">选择领域和难度，开始沉浸式 AI 面试体验</p>
 
-        <div className="bg-white rounded-xl shadow-sm border p-8 space-y-6">
+        <div className="soft-card p-8 space-y-6">
           {/* Mode selector */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">面试模式</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">面试模式</label>
             <div className="flex gap-2">
               <button
                 onClick={() => switchMode("general")}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                   mode === "general"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    ? "bg-sky-600 text-white"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >
                 通用模式
               </button>
               <button
                 onClick={() => switchMode("resume")}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                   mode === "resume"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    ? "bg-sky-600 text-white"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >
                 简历模式
@@ -255,7 +255,7 @@ export default function InterviewPage() {
           {/* Resume selection */}
           {mode === "resume" && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">选择简历</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">选择简历</label>
               {loadingResumes ? (
                 <LoadingState variant="spinner" message="加载简历中..." />
               ) : resumes.length === 0 ? (
@@ -274,18 +274,18 @@ export default function InterviewPage() {
                         setSelectedResumeId(r.id);
                         setSelectedResumeName(r.file_name);
                       }}
-                      className={`flex items-center justify-between gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      className={`flex items-center justify-between gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
                         selectedResumeId === r.id
-                          ? "border-blue-400 bg-blue-50"
-                          : "border-gray-200 hover:bg-gray-50"
+                          ? "border-sky-400 bg-sky-50"
+                          : "border-slate-200 hover:bg-slate-50"
                       }`}
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-gray-900 truncate">{r.file_name}</p>
+                        <p className="text-sm font-medium text-slate-900 truncate">{r.file_name}</p>
                         {r.structured_summary?.top_skills && r.structured_summary.top_skills.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {r.structured_summary.top_skills.slice(0, 4).map((s) => (
-                              <span key={s} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-xs">
+                              <span key={s} className="primary-chip">
                                 {s}
                               </span>
                             ))}
@@ -304,16 +304,16 @@ export default function InterviewPage() {
 
           {/* Domain */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">面试领域</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">面试领域</label>
             <div className="flex flex-wrap gap-2">
               {domains.map((d) => (
                 <button
                   key={d}
                   onClick={() => setSelectedDomain(d)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                     selectedDomain === d
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      ? "bg-sky-600 text-white"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                   }`}
                 >
                   {d}
@@ -324,16 +324,16 @@ export default function InterviewPage() {
 
           {/* Difficulty */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">难度</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">难度</label>
             <div className="flex gap-2">
               {difficulties.map((d) => (
                 <button
                   key={d.value}
                   onClick={() => setSelectedDifficulty(d.value)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                     selectedDifficulty === d.value
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      ? "bg-sky-600 text-white"
+                      : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                   }`}
                 >
                   {d.label}
@@ -343,13 +343,13 @@ export default function InterviewPage() {
           </div>
 
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
+            <div className="error-banner">{error}</div>
           )}
 
           <button
             onClick={startInterview}
             disabled={loading || !selectedDomain || (mode === "resume" && !selectedResumeId)}
-            className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-lg"
+            className="btn-primary-lg w-full"
           >
             {loading ? "准备中..." : "开始面试"}
           </button>
@@ -362,35 +362,36 @@ export default function InterviewPage() {
 
   if (phase === "interview") {
     return (
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="page-frame-tight">
         {resumeBadge}
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">模拟面试</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="page-title">模拟面试</h1>
+            <p className="section-hint mt-1">
               {mode === "resume" && <span>简历模式 · </span>}
-              领域: <span className="font-medium text-gray-700">{selectedDomain}</span>
-              {" · "}难度: <span className="font-medium text-gray-700">{selectedDifficulty}</span>
+              领域: <span className="font-medium text-slate-700">{selectedDomain}</span>
+              {" · "}难度: <span className="font-medium text-slate-700">{selectedDifficulty}</span>
+              {" · "}模型: <span className="font-medium text-slate-700">{LLM_MODEL}</span>
               {" · "}第 {turns.length + 1} 轮
             </p>
           </div>
           <button
             onClick={resetInterview}
-            className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            className="btn-ghost text-sm"
           >
             退出面试
           </button>
         </div>
 
         {/* Question */}
-        <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">{currentQuestion}</h2>
+        <div className="soft-card p-6 mb-6">
+          <h2 className="section-title mb-4">{currentQuestion}</h2>
           <textarea
             ref={answerRef}
             rows={6}
-            className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-y"
+            className="form-textarea disabled:bg-gray-100 disabled:cursor-not-allowed"
             placeholder="在此输入你的回答..."
             value={userAnswer}
             onChange={(e) => setUserAnswer(e.target.value)}
@@ -399,32 +400,42 @@ export default function InterviewPage() {
           <button
             onClick={submitAnswer}
             disabled={loading || !userAnswer.trim()}
-            className="mt-3 px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="btn-primary mt-3 flex items-center justify-center gap-2"
           >
-            {loading ? "提交中..." : "提交回答"}
+            {loading ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                提交中...
+              </>
+            ) : (
+              "提交回答"
+            )}
           </button>
           {error && (
-            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
+            <div className="mt-3 error-banner">{error}</div>
           )}
         </div>
 
         {/* Previous turns */}
         {turns.length > 0 && (
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">历史对话</h3>
+            <h3 className="section-hint uppercase tracking-wide">历史对话</h3>
             {turns.map((turn, i) => (
-              <div key={i} className="bg-white rounded-lg shadow-sm border p-5">
+              <div key={i} className="soft-card p-5">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs font-medium text-gray-500">第 {i + 1} 轮</span>
+                  <span className="text-xs font-medium text-slate-500">第 {i + 1} 轮</span>
                   <span className={`text-sm font-bold ${scoreColor(turn.score)}`}>{turn.score} 分</span>
                 </div>
-                <p className="text-sm text-gray-700 mb-2 font-medium">{turn.question}</p>
+                <p className="text-sm text-slate-700 mb-2 font-medium">{turn.question}</p>
                 <details className="mb-2">
-                  <summary className="text-xs text-gray-400 cursor-pointer">查看你的回答</summary>
-                  <p className="mt-1 text-sm text-gray-600 whitespace-pre-wrap bg-gray-50 rounded p-2">{turn.answer}</p>
+                  <summary className="text-xs text-slate-400 cursor-pointer">查看你的回答</summary>
+                  <p className="mt-1 text-sm text-slate-600 whitespace-pre-wrap bg-slate-50/70 rounded-xl p-3">{turn.answer}</p>
                 </details>
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <p className="text-sm text-blue-900">{turn.feedback}</p>
+                <div className="bg-sky-50/70 border border-sky-200 rounded-xl p-3">
+                  <p className="text-sm text-sky-900">{turn.feedback}</p>
                 </div>
               </div>
             ))}
@@ -437,23 +448,23 @@ export default function InterviewPage() {
   // ── Render: Done ───────────────────────────────────────────────────
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div className="page-frame-tight">
       {resumeBadge}
 
       <div className="text-center mb-8">
         <div className="text-5xl mb-4">&#127881;</div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">面试结束</h1>
-        <p className="text-gray-600">共 {totalTurns} 轮问答</p>
+        <h1 className="page-title">面试结束</h1>
+        <p className="section-hint">共 {totalTurns} 轮问答</p>
       </div>
 
       {/* Overall score */}
       {overallScore != null && (
-        <div className="bg-white rounded-xl shadow-sm border p-8 mb-6 text-center">
+        <div className="soft-card p-8 mb-6 text-center">
           <div className={`text-6xl font-bold ${scoreColor(overallScore)} mb-2`}>{overallScore}</div>
-          <div className="text-lg text-gray-600">综合评分</div>
-          <div className="w-48 mx-auto mt-4 bg-gray-200 rounded-full h-3">
+          <div className="text-lg text-slate-600">综合评分</div>
+          <div className="w-48 mx-auto mt-4 progress-track h-3">
             <div
-              className={`h-3 rounded-full ${scoreBarColor(overallScore)}`}
+              className={`h-3 rounded-full transition-all ${scoreBarColor(overallScore)}`}
               style={{ width: `${overallScore}%` }}
             />
           </div>
@@ -462,28 +473,28 @@ export default function InterviewPage() {
 
       {/* Summary */}
       {summary && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-6 mb-6">
-          <h3 className="text-lg font-semibold text-indigo-900 mb-3">面试总结</h3>
-          <p className="text-gray-700 whitespace-pre-wrap leading-relaxed">{summary}</p>
+        <div className="bg-violet-50/80 border border-violet-200 rounded-xl p-6 mb-6">
+          <h3 className="section-title text-violet-900 mb-3">面试总结</h3>
+          <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{summary}</p>
         </div>
       )}
 
       {/* All turns */}
       <div className="space-y-4 mb-8">
-        <h3 className="text-lg font-semibold text-gray-900">完整对话记录</h3>
+        <h3 className="section-title">完整对话记录</h3>
         {turns.map((turn, i) => (
-          <div key={i} className="bg-white rounded-lg shadow-sm border p-5">
+          <div key={i} className="soft-card p-5">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-medium text-gray-500">第 {i + 1} 轮</span>
+              <span className="text-xs font-medium text-slate-500">第 {i + 1} 轮</span>
               <span className={`text-sm font-bold ${scoreColor(turn.score)}`}>{turn.score} 分</span>
             </div>
-            <p className="text-sm text-gray-900 font-medium mb-1">{turn.question}</p>
+            <p className="text-sm text-slate-900 font-medium mb-1">{turn.question}</p>
             <details className="mb-2">
-              <summary className="text-xs text-gray-400 cursor-pointer">查看回答</summary>
-              <p className="mt-1 text-sm text-gray-600 whitespace-pre-wrap bg-gray-50 rounded p-2">{turn.answer}</p>
+              <summary className="text-xs text-slate-400 cursor-pointer">查看回答</summary>
+              <p className="mt-1 text-sm text-slate-600 whitespace-pre-wrap bg-slate-50/70 rounded-xl p-2">{turn.answer}</p>
             </details>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <p className="text-sm text-blue-900">{turn.feedback}</p>
+            <div className="bg-sky-50/70 border border-sky-200 rounded-xl p-3">
+              <p className="text-sm text-sky-900">{turn.feedback}</p>
             </div>
           </div>
         ))}
@@ -493,13 +504,13 @@ export default function InterviewPage() {
       <div className="flex gap-4 justify-center">
         <button
           onClick={resetInterview}
-          className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+          className="btn-primary"
         >
           再来一次
         </button>
         <a
           href="/stats"
-          className="px-6 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+          className="btn-secondary"
         >
           查看统计
         </a>

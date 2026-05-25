@@ -198,7 +198,7 @@ class AIService:
             question_text = f"{question.title}\n{question.content}"
 
         if not question_text:
-            raise ValueError("Either question_id or question_text must be providing")
+            raise ValueError("Either question_id or question_text must be provided")
 
         task_manager = TaskManager(self.session)
         if existing_task_id is not None:

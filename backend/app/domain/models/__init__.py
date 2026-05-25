@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.domain.models.user import User  # noqa: F401 — ensure table is registered
+from app.domain.models.audit import AuditLog  # noqa: F401
 
 
 # ── SQLAlchemy column helpers (pgvector + JSONB) ──
@@ -205,6 +206,7 @@ class File(SQLModel, table=True):
     __tablename__ = "files"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: str | None = Field(default=None, max_length=255)
     file_name: str = Field(max_length=255)
     file_path: str = Field(max_length=500)
     file_type: str = Field(max_length=50)
@@ -393,6 +395,7 @@ class ExamAnswer(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     session_id: uuid.UUID = Field(foreign_key="exam_sessions.id")
+    user_id: str | None = Field(default=None, max_length=255)
     question_id: uuid.UUID = Field(foreign_key="questions.id")
     user_answer: str | None = None
     score: float | None = None

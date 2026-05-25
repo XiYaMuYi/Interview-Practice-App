@@ -428,9 +428,34 @@ class RegisterResponse(BaseModel):
 
     user_id: str
     username: str
-    access_token: str
-    refresh_token: str
-    expires_in: int
+    access_token: str | None = None
+    refresh_token: str | None = None
+    expires_in: int | None = None
+    review_status: str | None = None
+    message: str | None = None
+
+
+class AdminReviewRequest(BaseModel):
+    action: str = Field(pattern="^(approved|rejected)$")
+    remark: str | None = Field(default=None, max_length=500)
+
+
+class AdminUserListItem(BaseModel):
+    user_id: str
+    username: str
+    email: str | None
+    role: str
+    review_status: str
+    is_active: bool
+    created_at: str
+    last_login_at: str | None
+
+
+class RegisterPendingResponse(BaseModel):
+    user_id: str
+    username: str
+    review_status: str
+    message: str
 
 
 class TokenRefreshRequest(BaseModel):
@@ -520,3 +545,33 @@ class PromptVersionCreate(BaseModel):
     content: str
     model_hints: dict = {}
     description: str = ""
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Audit DTOs
+# ─────────────────────────────────────────────────────────────────────
+
+
+class AuditLogResponse(BaseModel):
+    """Single audit log entry."""
+
+    id: UUID
+    actor_id: UUID | None
+    actor_username: str | None
+    action: str
+    target_type: str | None
+    target_id: str | None
+    detail: str | None
+    ip_address: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AuditLogListResponse(BaseModel):
+    """Paginated audit log list."""
+
+    total: int
+    page: int
+    page_size: int
+    items: list[AuditLogResponse]

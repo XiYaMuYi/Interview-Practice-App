@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.deps import DbSession, get_current_admin_user
 from app.domain.models.user import User
-from app.domain.schemas import AdminReviewRequest, AdminUserListItem
+from app.domain.schemas import AdminReviewRequest, AdminUserListItem, AuditLogListResponse, AuditLogResponse
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthService
 from app.utils.request import get_client_ip
@@ -105,3 +105,42 @@ async def review_user(
         "review_status": user.review_status,
         "is_active": user.is_active,
     }
+
+
+@router.get("/audit-logs", response_model=AuditLogListResponse)
+async def list_audit_logs(
+    session: DbSession,
+    _admin: User = Depends(get_current_admin_user),
+    page: int = 1,
+    page_size: int = 20,
+    action: str | None = None,
+    target_type: str | None = None,
+):
+    """List audit logs with pagination and filters (admin only)."""
+    offset = (page - 1) * page_size
+    service = AuditService(session)
+    items, total = await service.list_logs(
+        action=action,
+        target_type=target_type,
+        limit=page_size,
+        offset=offset,
+    )
+    return AuditLogListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=[
+            AuditLogResponse(
+                id=item.id,
+                actor_id=item.actor_id,
+                actor_username=item.actor_username,
+                action=item.action,
+                target_type=item.target_type,
+                target_id=item.target_id,
+                detail=item.detail,
+                ip_address=item.ip_address,
+                created_at=item.created_at,
+            )
+            for item in items
+        ],
+    )

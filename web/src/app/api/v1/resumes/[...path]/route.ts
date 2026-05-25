@@ -3,6 +3,14 @@
  * Next.js rewrites buffer SSE responses, so we use an explicit
  * API route with fetch + ReadableStream to pass through streaming POST requests.
  * GET/DELETE are also proxied here as a fallback to rewrites.
+ *
+ * Routes handled here:
+ *   - GET    /api/v1/resumes
+ *   - GET    /api/v1/resumes/{id}
+ *   - POST   /api/v1/resumes/upload
+ *   - POST   /api/v1/resumes/{id}/parse-stream
+ *   - DELETE /api/v1/resumes/{id}
+ *   - GET    /api/v1/resumes/tasks/{taskId}
  */
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -11,7 +19,7 @@ export const dynamic = 'force-dynamic';
 
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
 
-function buildUrl(request: NextRequest, params: { path: string[] }): { url: string; headers: Headers; method: string } {
+function buildUrl(request: NextRequest, params: { path: string[] }): { url: string; headers: Headers } {
   const path = params.path.join('/');
   const url = `${BACKEND}/api/v1/resumes${path ? '/' + path : ''}`;
 
@@ -20,7 +28,7 @@ function buildUrl(request: NextRequest, params: { path: string[] }): { url: stri
   headers.delete('host');
   headers.delete('content-length');
 
-  return { url, headers, method: request.method };
+  return { url, headers };
 }
 
 // POST — SSE streaming passthrough (parse-stream, upload, etc.)

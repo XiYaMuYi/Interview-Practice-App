@@ -221,7 +221,8 @@ export default function ExamSessionPage() {
           this.readyState = EventSource.CLOSED;
           controller.abort();
         },
-        addEventListener(_type: string, _listener: (..._args: unknown[]) => void) {},
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        addEventListener(_type: string, _listener: any) {},
         onmessage: null as ((event: MessageEvent) => void) | null,
         onerror: null as (() => void) | null,
       };

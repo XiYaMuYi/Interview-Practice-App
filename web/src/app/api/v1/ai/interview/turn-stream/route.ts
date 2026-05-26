@@ -1,5 +1,5 @@
-/**
- * Proxy for POST /api/v1/ai/interview/turn-stream â†?backend /api/v1/ai/interview/turn-stream.
+ï»¿/**
+ * Proxy for POST /api/v1/ai/interview/turn-stream ï¿½?backend /api/v1/ai/interview/turn-stream.
  * Forwards SSE responses from the backend directly to the client.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     const isTimeout = err instanceof DOMException && err.name === "AbortError";
     const isConnectionRefused = msg.includes("ECONNREFUSED") || msg.includes("fetch failed");
     console.error(
-      `[turn-stream-proxy] POST ${url} failed: ${isTimeout ? "timeout" : "error"} â€?${msg}`
+      `[turn-stream-proxy] POST ${url} failed: ${isTimeout ? "timeout" : "error"} ï¿½?${msg}`
     );
     return NextResponse.json(
       {

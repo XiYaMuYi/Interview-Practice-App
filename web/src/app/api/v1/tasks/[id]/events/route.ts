@@ -1,5 +1,5 @@
-/**
- * Proxy for GET /api/v1/tasks/[id]/events â†?backend /api/v1/tasks/{id}/events.
+ï»¿/**
+ * Proxy for GET /api/v1/tasks/[id]/events ï¿½?backend /api/v1/tasks/{id}/events.
  * Streams SSE task progress events from the backend directly to the client.
  */
 import { NextRequest, NextResponse } from "next/server";

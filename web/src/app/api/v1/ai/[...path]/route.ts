@@ -1,12 +1,12 @@
-/**
+ï»¿/**
  * Catch-all proxy for AI API requests to the backend.
  * Detects SSE responses (text/event-stream) and passes them through as-is;
  * falls back to JSON for regular API responses.
  *
  * NOTE: The following paths have dedicated proxy routes and do NOT fall through:
- *   - POST /api/v1/ai/explain-stream          â†?explain-stream/route.ts
- *   - POST /api/v1/ai/evaluate-stream         â†?evaluate-stream/route.ts
- *   - POST /api/v1/ai/interview/turn-stream   â†?interview/turn-stream/route.ts
+ *   - POST /api/v1/ai/explain-stream          ï¿½?explain-stream/route.ts
+ *   - POST /api/v1/ai/evaluate-stream         ï¿½?evaluate-stream/route.ts
+ *   - POST /api/v1/ai/interview/turn-stream   ï¿½?interview/turn-stream/route.ts
  *
  * This catch-all handles all remaining paths, e.g.:
  *   - POST /api/v1/ai/interview/start

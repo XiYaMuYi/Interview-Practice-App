@@ -1,5 +1,5 @@
-/**
- * Proxy for POST /api/v1/ai/evaluate-stream â†?backend /api/v1/ai/evaluate-stream.
+ï»¿/**
+ * Proxy for POST /api/v1/ai/evaluate-stream ï¿½?backend /api/v1/ai/evaluate-stream.
  * Forwards SSE responses from the backend directly to the client.
  */
 import { NextRequest, NextResponse } from "next/server";

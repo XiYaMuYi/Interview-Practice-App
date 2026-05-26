@@ -221,7 +221,7 @@ export default function ExamSessionPage() {
           this.readyState = EventSource.CLOSED;
           controller.abort();
         },
-        addEventListener() {},
+        addEventListener(_type: string, _listener: (..._args: unknown[]) => void) {},
         onmessage: null as ((event: MessageEvent) => void) | null,
         onerror: null as (() => void) | null,
       };

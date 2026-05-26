@@ -5,8 +5,10 @@
 import axios from "axios";
 import { getAccessToken, refreshAccessToken, clearAuth } from "@/lib/auth";
 
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || ""; // Use env var on Vercel, empty string for local rewrites
+
 const api = axios.create({
-  baseURL: "", // Uses relative paths → Next.js rewrites/proxies handle routing
+  baseURL: apiBaseUrl,
 });
 
 // ── Request interceptor: attach Bearer token ──

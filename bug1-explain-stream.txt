@@ -1,0 +1,12 @@
+Fix bug: /api/v1/ai/explain-stream frontend proxy returns 502.
+
+Root cause: Backend raises ValueError with bad grammar "must be providing" (should be "must be provided"). The catch-all [...path] route and the dedicated explain-stream route both exist under /api/v1/ai, which may cause route conflicts in Next.js.
+
+Changes needed:
+1. In backend/app/services/ai_service.py line ~201, fix the ValueError message from "must be providing" to "must be provided"
+2. In web/src/app/api/v1/ai/[...path]/route.ts, the catch-all route should NOT handle requests that have dedicated routes (explain-stream, evaluate-stream, interview/turn-stream). The catch-all path construction adds /api/v1/ai/ prefix, so the full URL becomes http://localhost:8000/api/v1/ai/explain-stream which is correct. But check if the catch-all might intercept requests meant for dedicated route files.
+3. Make sure the dedicated explain-stream route.ts properly forwards errors and returns the backend's status code (not always 502 for validation errors).
+
+The dedicated route at web/src/app/api/v1/ai/explain-stream/route.ts already exists and handles the proxy correctly. Verify that Next.js routes the request to the dedicated route and not the catch-all.
+
+Commit changes.

@@ -1,0 +1,22 @@
+Fix 3 bugs in D:\AI_Project\Surprise\Interview-Practice-App:
+
+Bug 1: Frontend /api/v1/ai/explain-stream proxy returns 502
+- The backend at backend/app/services/ai_service.py line ~201 has a typo: "Either question_id or question_text must be providing" should be "Either question_id or question_text must be provided"
+- This causes a ValueError 500 on the backend which the frontend proxy returns as 502
+- Fix the typo in ai_service.py
+
+Bug 2: interview/turn-stream frontend chain needs alignment
+- The frontend proxy at web/src/app/api/v1/ai/interview/turn-stream/route.ts proxies to backend /api/v1/ai/interview/turn-stream
+- The backend route exists at backend/app/api/v1/routes/ai_routes.py as interview_turn_stream()
+- Verify the chain works end-to-end. The proxy constructs URL as ${BACKEND}/api/v1/ai/interview/turn-stream - confirm this matches the backend route exactly.
+- Also check if there are any frontend components calling the wrong path.
+
+Bug 3: Scan for residual old entry points
+- The project has BOTH dedicated proxy routes (explain-stream/route.ts, evaluate-stream/route.ts, interview/turn-stream/route.ts) AND a catch-all [...path]/route.ts under web/src/app/api/v1/ai/
+- The catch-all route at [...path]/route.ts constructs URL as ${BACKEND}/api/v1/ai/{path.join("/")} which means for "explain-stream" it builds the same URL as the dedicated route
+- This creates potential conflicts. The dedicated routes should take priority in Next.js routing, but the catch-all is redundant and confusing.
+- Search the entire project (frontend + backend) for any stale/old API entry points, hardcoded URLs, or deprecated routes related to /ai/explain-stream, /ai/interview, /ai/evaluate, /ai/turn-stream
+- Remove or consolidate the catch-all route if all paths are covered by dedicated routes, OR keep it but document its purpose clearly.
+- Check for any components still calling old paths.
+
+Make all code changes, test by running the backend health check, and commit with a descriptive message.

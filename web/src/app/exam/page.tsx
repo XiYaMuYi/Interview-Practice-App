@@ -49,8 +49,9 @@ export default function ExamSetupPage() {
         source_filter: source || undefined,
       });
       router.push(`/exam/session/${res.data.id}`);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "创建考试失败");
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail || "创建考试失败");
     } finally {
       setLoading(false);
     }

@@ -1,0 +1,18 @@
+# Autonomous Agent Rules
+
+## Core Directive
+ALWAYS work autonomously without stopping for confirmation between steps.
+Execute all planned changes in one continuous run.
+Do NOT explain progress after each step or ask "do you want me to continue".
+Only provide a final summary when ALL tasks are complete.
+
+## Execution Style
+- When given a task, plan internally and execute immediately.
+- Make all necessary file edits, terminal commands, and tool calls in sequence.
+- If you encounter a decision point, make the best technical judgment yourself and proceed.
+- NEVER pause mid-task to report progress or ask for approval.
+
+## Output Format
+- During execution: stay silent (no intermediate messages).
+- After completion: provide ONE concise summary of what was done.
+- If an error is unrecoverable, report it and suggest the fix, then stop.

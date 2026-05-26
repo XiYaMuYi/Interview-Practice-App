@@ -124,7 +124,7 @@ async function apiCall<T>(
   if (!res.ok) {
     const errBody = await res.json().catch(() => null);
     throw new Error(
-      (errBody as any)?.detail || `Auth API error: ${res.status}`
+      (errBody as { detail?: string })?.detail || `Auth API error: ${res.status}`
     );
   }
 

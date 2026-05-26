@@ -1,0 +1,29 @@
+Fix 3 bugs in the Interview-Practice-App project at D:\AI_Project\Surprise\Interview-Practice-App
+
+## Bug 1: Frontend /api/v1/ai/explain-stream proxy returns 502
+The backend at backend/app/services/ai_service.py line ~201 has a grammar error:
+"Either question_id or question_text must be providing"
+should be "Either question_id or question_text must be provided"
+This ValueError causes a 500 on the backend, which the frontend proxy returns as 502.
+Fix the grammar in ai_service.py.
+
+Also check the frontend route at web/src/app/api/v1/ai/explain-stream/route.ts - it has a dedicated POST handler that proxies to the backend. Make sure it handles backend 500 errors correctly (returning the backend status code, not always 502 for non-connection errors). The catch-all route at web/src/app/api/v1/ai/[...path]/route.ts may also conflict with the dedicated route. Verify Next.js resolves the dedicated route correctly for /api/v1/ai/explain-stream.
+
+## Bug 2: interview/turn-stream frontend chain alignment
+The frontend has a dedicated route at web/src/app/api/v1/ai/interview/turn-stream/route.ts.
+The backend has POST /api/v1/ai/interview/turn-stream in backend/app/api/v1/routes/ai_routes.py.
+Check if the frontend correctly calls this backend endpoint. The frontend route proxies to `${BACKEND}/api/v1/ai/interview/turn-stream` which matches the backend route. But verify the full chain works:
+1. Frontend component → calls /api/v1/ai/interview/turn-stream (Next.js API route)
+2. Next.js route → proxies to backend /api/v1/ai/interview/turn-stream
+3. Backend ai_routes.py → handles the request with interview_turn_stream()
+
+Also check if the catch-all route at web/src/app/api/v1/ai/[...path]/route.ts interferes. The catch-all would construct URL as `${BACKEND}/api/v1/ai/interview/turn-stream` which is the same. But having both dedicated and catch-all routes can cause confusion.
+
+## Bug 3: Scan for residual old entry points
+Search the entire project for old/stale references to AI endpoints that may conflict with the current routing:
+- Any hardcoded URLs pointing to /ai/explain-stream, /ai/interview, etc. without the /api/v1 prefix
+- Any old route files that should be removed
+- Any frontend components that call incorrect API paths
+- The catch-all [...path] route - determine if it should be kept or if all routes should be dedicated
+
+Make all changes, then commit with a descriptive message.

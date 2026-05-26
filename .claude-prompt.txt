@@ -1,0 +1,1 @@
+读取 .claude-task.md 并执行任务。修复三个问题：explain-stream 502、turn-stream 前端对齐、清理旧入口。只修未完成的部分，不要动已完成的部分。完成后创建 .claude-done.md 文件。

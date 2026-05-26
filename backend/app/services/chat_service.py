@@ -49,13 +49,12 @@ class ChatService:
             .offset(offset)
             .limit(limit)
         )
-        # User isolation
+        # User isolation — ChatHistory is personal data, use owned_only
         if user_ctx and not user_ctx.is_admin:
             if user_ctx.is_anonymous:
                 stmt = stmt.where(ChatHistory.user_id.is_(None))
             else:
-                from sqlalchemy import or_ as _or
-                stmt = stmt.where(_or(ChatHistory.user_id == user_ctx.user_id, ChatHistory.user_id.is_(None)))
+                stmt = stmt.where(ChatHistory.user_id == user_ctx.user_id)
         result = await self.session.exec(stmt)
         rows = result.all()
 
@@ -82,13 +81,12 @@ class ChatService:
 
         # Count distinct sessions
         count_stmt = select(sa_func.count(sa_func.distinct(ChatHistory.session_id)))
-        # User isolation
+        # User isolation — owned_only for personal data
         if user_ctx and not user_ctx.is_admin:
             if user_ctx.is_anonymous:
                 count_stmt = count_stmt.where(ChatHistory.user_id.is_(None))
             else:
-                from sqlalchemy import or_ as _or
-                count_stmt = count_stmt.where(_or(ChatHistory.user_id == user_ctx.user_id, ChatHistory.user_id.is_(None)))
+                count_stmt = count_stmt.where(ChatHistory.user_id == user_ctx.user_id)
         total = (await self.session.exec(count_stmt)).scalar_one()
 
         # Data query
@@ -99,13 +97,12 @@ class ChatService:
             .offset(offset)
             .limit(page_size)
         )
-        # User isolation
+        # User isolation — owned_only for personal data
         if user_ctx and not user_ctx.is_admin:
             if user_ctx.is_anonymous:
                 stmt = stmt.where(ChatHistory.user_id.is_(None))
             else:
-                from sqlalchemy import or_ as _or
-                stmt = stmt.where(_or(ChatHistory.user_id == user_ctx.user_id, ChatHistory.user_id.is_(None)))
+                stmt = stmt.where(ChatHistory.user_id == user_ctx.user_id)
         result = await self.session.exec(stmt)
         rows = result.all()
 

@@ -18,9 +18,14 @@ def apply_user_filter(
     filters: Dict[str, Any],
     ctx: UserContext,
     table_has_user_id: bool = True,
-    allow_public: bool = False,
+    allow_public: bool = True,
 ) -> Dict[str, Any]:
-    """将 user_id 注入查询过滤器。"""
+    """将 user_id 注入查询过滤器。
+
+    allow_public 控制登录后是否包含公共/匿名记录（user_id IS NULL）：
+    - True  → owned_or_public（题目库等共享数据用）
+    - False → owned_only（学习记录、统计、文件等个人数据用）
+    """
     if ctx.is_admin:
         return filters
 
@@ -30,7 +35,10 @@ def apply_user_filter(
         return filters
 
     if table_has_user_id:
-        filters["__user_filter_mode"] = "owned_or_public"
+        if allow_public:
+            filters["__user_filter_mode"] = "owned_or_public"
+        else:
+            filters["__user_filter_mode"] = "owned_only"
         filters["__user_id"] = ctx.user_id
 
     return filters

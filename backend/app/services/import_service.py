@@ -539,7 +539,7 @@ class ImportService:
             if user_ctx.is_anonymous:
                 filters["user_id"] = None
             else:
-                filters["__user_filter_mode"] = "owned_or_public"
+                filters["__user_filter_mode"] = "owned_only"
                 filters["__user_id"] = user_ctx.user_id
         return list(
             await self.file_repo.list(filters=filters, offset=offset, limit=limit)

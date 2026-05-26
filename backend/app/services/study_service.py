@@ -64,13 +64,13 @@ class StudyService:
         if study_type:
             filters["study_type"] = study_type
 
-        # User isolation
+        # User isolation — StudyRecord is personal data, use owned_only
         if user_ctx and user_ctx.is_admin:
             pass
         elif user_ctx and user_ctx.is_anonymous:
             filters["__user_filter_mode"] = "public_only"
         elif user_ctx:
-            filters["__user_filter_mode"] = "owned_or_public"
+            filters["__user_filter_mode"] = "owned_only"
             filters["__user_id"] = user_ctx.user_id
 
         records = await self.study_repo.list(offset=offset, limit=limit, filters=filters)
@@ -106,13 +106,13 @@ class StudyService:
         if study_type:
             filters["study_type"] = study_type
 
-        # User isolation
+        # User isolation — StudyRecord is personal data, use owned_only
         if user_ctx and user_ctx.is_admin:
             pass
         elif user_ctx and user_ctx.is_anonymous:
             filters["__user_filter_mode"] = "public_only"
         elif user_ctx:
-            filters["__user_filter_mode"] = "owned_or_public"
+            filters["__user_filter_mode"] = "owned_only"
             filters["__user_id"] = user_ctx.user_id
 
         records, total = await self.study_repo.list_with_count(
@@ -131,16 +131,13 @@ class StudyService:
             )
             if study_type:
                 q_filter_stmt = q_filter_stmt.where(StudyRecord.study_type == study_type)
-            # User isolation
+            # User isolation — owned_only for personal data
             if user_ctx and user_ctx.is_admin:
                 pass
             elif user_ctx and user_ctx.is_anonymous:
                 q_filter_stmt = q_filter_stmt.where(StudyRecord.user_id.is_(None))
             elif user_ctx:
-                from sqlalchemy import or_ as _or
-                q_filter_stmt = q_filter_stmt.where(
-                    _or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None))
-                )
+                q_filter_stmt = q_filter_stmt.where(StudyRecord.user_id == user_ctx.user_id)
             total = (await self.session.exec(q_filter_stmt)).scalar_one()
 
         # Batch-fetch questions to avoid N+1
@@ -171,7 +168,7 @@ class StudyService:
         """Get study records for a specific question, scoped to the current user."""
         filters: dict = {"question_id": question_id}
         if user_ctx and not user_ctx.is_admin:
-            filters["__user_filter_mode"] = "public_only" if user_ctx.is_anonymous else "owned_or_public"
+            filters["__user_filter_mode"] = "public_only" if user_ctx.is_anonymous else "owned_only"
             if not user_ctx.is_anonymous:
                 filters["__user_id"] = user_ctx.user_id
         records = await self.study_repo.list(filters=filters, limit=1000)
@@ -192,7 +189,7 @@ class StudyService:
         # Find the last review record for this question (filtered by user)
         last_filters: dict = {"question_id": question_id, "study_type": "review"}
         if user_ctx and not user_ctx.is_admin:
-            last_filters["__user_filter_mode"] = "public_only" if user_ctx.is_anonymous else "owned_or_public"
+            last_filters["__user_filter_mode"] = "public_only" if user_ctx.is_anonymous else "owned_only"
             if not user_ctx.is_anonymous:
                 last_filters["__user_id"] = user_ctx.user_id
         last_records = await self.study_repo.list(
@@ -246,14 +243,13 @@ class StudyService:
                 StudyRecord.next_review_at <= now,
             )
         )
-        # User isolation
+        # User isolation — owned_only for personal data
         if user_ctx and user_ctx.is_admin:
             pass
         elif user_ctx and user_ctx.is_anonymous:
             stmt = stmt.where(StudyRecord.user_id.is_(None))
         elif user_ctx:
-            from sqlalchemy import or_ as _or
-            stmt = stmt.where(_or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None)))
+            stmt = stmt.where(StudyRecord.user_id == user_ctx.user_id)
         stmt = stmt.order_by(StudyRecord.next_review_at.asc()).limit(limit)
         result = await self.session.exec(stmt)
         due_records = result.all()
@@ -300,14 +296,13 @@ class StudyService:
                 StudyRecord.next_review_at <= now,
             )
         )
-        # User isolation
+        # User isolation — owned_only for personal data
         if user_ctx and user_ctx.is_admin:
             pass
         elif user_ctx and user_ctx.is_anonymous:
             count_stmt = count_stmt.where(StudyRecord.user_id.is_(None))
         elif user_ctx:
-            from sqlalchemy import or_ as _or
-            count_stmt = count_stmt.where(_or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None)))
+            count_stmt = count_stmt.where(StudyRecord.user_id == user_ctx.user_id)
         total = (await self.session.exec(count_stmt)).scalar_one()
 
         # Data query with pagination
@@ -327,14 +322,13 @@ class StudyService:
             .offset(offset)
             .limit(page_size)
         )
-        # User isolation
+        # User isolation — owned_only for personal data
         if user_ctx and user_ctx.is_admin:
             pass
         elif user_ctx and user_ctx.is_anonymous:
             stmt = stmt.where(StudyRecord.user_id.is_(None))
         elif user_ctx:
-            from sqlalchemy import or_ as _or
-            stmt = stmt.where(_or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None)))
+            stmt = stmt.where(StudyRecord.user_id == user_ctx.user_id)
         result = await self.session.exec(stmt)
         due_records = result.all()
 
@@ -366,17 +360,14 @@ class StudyService:
 
     async def get_stats(self, *, user_ctx: UserContext | None = None) -> dict:
         """Get aggregated study statistics."""
-        # Base user filter
+        # Base user filter — owned_only for personal data
         user_conditions = []
         if user_ctx and user_ctx.is_admin:
             pass
         elif user_ctx and user_ctx.is_anonymous:
             user_conditions.append(StudyRecord.user_id.is_(None))
         elif user_ctx:
-            from sqlalchemy import or_ as _or
-            user_conditions.append(
-                _or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None))
-            )
+            user_conditions.append(StudyRecord.user_id == user_ctx.user_id)
 
         # Total sessions
         total_stmt = select(func.count()).select_from(StudyRecord).where(*user_conditions)
@@ -507,10 +498,15 @@ class StudyService:
 
                 cutoff = datetime.utcnow() - timedelta(days=days)
 
-                # Base query filters
+                # Base query filters with user isolation — owned_only for personal data
                 base_filters = [StudyRecord.reviewed_at >= cutoff]
                 if session_id:
                     base_filters.append(StudyRecord.session_id == session_id)
+                if user_ctx and not user_ctx.is_admin:
+                    if user_ctx.is_anonymous:
+                        base_filters.append(StudyRecord.user_id.is_(None))
+                    else:
+                        base_filters.append(StudyRecord.user_id == user_ctx.user_id)
 
                 # Total sessions
                 total_stmt = select(func.count()).select_from(StudyRecord).where(*base_filters)
@@ -735,6 +731,12 @@ class StudyService:
                         .order_by(func.avg(StudyRecord.ai_score).asc())
                         .limit(10)
                     )
+                    # User isolation — owned_only for personal data
+                    if user_ctx and not user_ctx.is_admin:
+                        if user_ctx.is_anonymous:
+                            weak_stmt = weak_stmt.where(StudyRecord.user_id.is_(None))
+                        else:
+                            weak_stmt = weak_stmt.where(StudyRecord.user_id == user_ctx.user_id)
                     weak_result = await self.session.exec(weak_stmt)
                     weak_tags = [row[0] for row in weak_result.all()]
 

@@ -120,14 +120,13 @@ class ExamService:
         question_result = await self.session.scalars(q_stmt)
         questions = list(question_result.all())
 
-        # Fetch answers
+        # Fetch answers — ExamAnswer is personal data, use owned_only
         a_stmt = select(ExamAnswer).where(ExamAnswer.session_id == session_id)
         if user_ctx and not user_ctx.is_admin:
             if user_ctx.is_anonymous:
                 a_stmt = a_stmt.where(ExamAnswer.user_id.is_(None))
             else:
-                from sqlalchemy import or_ as _or
-                a_stmt = a_stmt.where(_or(ExamAnswer.user_id == user_ctx.user_id, ExamAnswer.user_id.is_(None)))
+                a_stmt = a_stmt.where(ExamAnswer.user_id == user_ctx.user_id)
         answer_result = await self.session.scalars(a_stmt)
         answers = {str(a.question_id): a for a in answer_result.all()}
 
@@ -284,8 +283,7 @@ class ExamService:
             if user_ctx.is_anonymous:
                 a_stmt = a_stmt.where(ExamAnswer.user_id.is_(None))
             else:
-                from sqlalchemy import or_ as _or
-                a_stmt = a_stmt.where(_or(ExamAnswer.user_id == user_ctx.user_id, ExamAnswer.user_id.is_(None)))
+                a_stmt = a_stmt.where(ExamAnswer.user_id == user_ctx.user_id)
         answer_result = await self.session.scalars(a_stmt)
         answers = {a.question_id: a for a in answer_result.all()}
 

@@ -53,6 +53,8 @@ class BaseRepository(Generic[ModelT]):
                     from sqlalchemy import or_
 
                     stmt = stmt.where(or_(getattr(self.model, "user_id") == user_id, getattr(self.model, "user_id").is_(None)))
+                elif user_filter_mode == "owned_only" and user_id is not None:
+                    stmt = stmt.where(getattr(self.model, "user_id") == user_id)
             for key, value in filters.items():
                 if key.startswith("__user_"):
                     continue
@@ -91,6 +93,8 @@ class BaseRepository(Generic[ModelT]):
                     from sqlalchemy import or_
 
                     stmt = stmt.where(or_(getattr(self.model, "user_id") == user_id, getattr(self.model, "user_id").is_(None)))
+                elif user_filter_mode == "owned_only" and user_id is not None:
+                    stmt = stmt.where(getattr(self.model, "user_id") == user_id)
             for key, value in filters.items():
                 if key.startswith("__user_"):
                     continue
@@ -321,6 +325,9 @@ class StudyRecordRepository(BaseRepository["StudyRecord"]):
                 owned_or_public = or_(self.model.user_id == user_id, self.model.user_id.is_(None))
                 count_stmt = count_stmt.where(owned_or_public)
                 data_stmt = data_stmt.where(owned_or_public)
+            elif user_filter_mode == "owned_only" and user_id is not None:
+                count_stmt = count_stmt.where(self.model.user_id == user_id)
+                data_stmt = data_stmt.where(self.model.user_id == user_id)
             for key, value in filters.items():
                 if key.startswith("__user_"):
                     continue

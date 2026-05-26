@@ -66,6 +66,7 @@ class TaskManager:
                     "total_chunks": task.total_chunks,
                     "processed_chunks": task.processed_chunks,
                     "error_message": task.error_message,
+                    "extra_data": task.extra_data,
                     "created_at": task.created_at.isoformat() if task.created_at else None,
                     "updated_at": task.updated_at.isoformat() if task.updated_at else None,
                 },
@@ -125,6 +126,7 @@ class TaskManager:
             await set_cache(
                 _task_status_key(str(task_id)),
                 {
+                    "id": str(task_id),
                     "task_id": str(task_id),
                     "task_type": task.task_type,
                     "status": task.status,
@@ -241,6 +243,26 @@ class TaskManager:
         that both the direct StreamingResponse consumer and the GET
         ``/tasks/{task_id}/events`` endpoint receive the same event stream.
         """
+        if "event_type" not in event:
+            if "token" in event:
+                event["event_type"] = "token"
+            elif "content" in event:
+                event["event_type"] = "content"
+            elif "error" in event:
+                event["event_type"] = "error"
+            elif event.get("status") == "done":
+                event["event_type"] = "done"
+            elif "evaluation" in event or {"score", "feedback"}.issubset(event):
+                event["event_type"] = "evaluation"
+            elif "summary" in event:
+                event["event_type"] = "summary"
+            elif "followup_question" in event:
+                event["event_type"] = "followup"
+            elif "recommendations" in event:
+                event["event_type"] = "recommendations"
+            else:
+                event["event_type"] = "progress"
+
         async with self._lock:
             subscribers = list(self._subscribers.get(task_id, []))
         for queue in subscribers:
@@ -257,9 +279,75 @@ class TaskManager:
 async def sse_event_stream(task_manager: TaskManager, task_id: str) -> AsyncGenerator[str, None]:
     """Generate SSE events for a task."""
     queue = await task_manager.subscribe(task_id)
+
+    async def emit_db_snapshot():
+        task = await task_manager.get_task(UUID(task_id))
+        if not task:
+            return
+
+        snapshot = {
+            "event_type": "progress",
+            "task_id": task_id,
+            "status": task.status,
+            "progress": task.progress,
+            "current_phase": task.current_phase,
+            "total_chunks": task.total_chunks,
+            "processed_chunks": task.processed_chunks,
+            "error_message": task.error_message,
+        }
+        if task.extra_data:
+            snapshot.update(task.extra_data)
+        yield f"event: progress\ndata: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
+
+        if task.status == "done":
+            if task.extra_data and task.extra_data.get("content"):
+                content_event = {
+                    "event_type": "content",
+                    "task_id": task_id,
+                    "content": task.extra_data["content"],
+                    **({"depth": task.extra_data["depth"]} if task.extra_data.get("depth") else {}),
+                }
+                yield f"event: content\ndata: {json.dumps(content_event, ensure_ascii=False)}\n\n"
+            done_event = {"event_type": "done", "task_id": task_id, "status": "done", "progress": 1.0}
+            if task.extra_data:
+                done_event.update(task.extra_data)
+            yield f"event: done\ndata: {json.dumps(done_event, ensure_ascii=False)}\n\n"
+            return
+
+        if task.status == "failed":
+            error_event = {
+                "event_type": "error",
+                "task_id": task_id,
+                "status": "failed",
+                "error": task.error_message or "Task failed",
+                "recoverable": False,
+            }
+            yield f"event: error\ndata: {json.dumps(error_event, ensure_ascii=False)}\n\n"
+            return
+
     try:
+        try:
+            async for snapshot_event in emit_db_snapshot():
+                yield snapshot_event
+                if snapshot_event.startswith("event: done") or snapshot_event.startswith("event: error"):
+                    return
+        except Exception:
+            logger.exception("Failed to emit initial SSE task snapshot")
+
         while True:
-            event = await queue.get()
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=2)
+            except asyncio.TimeoutError:
+                try:
+                    async for snapshot_event in emit_db_snapshot():
+                        yield snapshot_event
+                        if snapshot_event.startswith("event: done") or snapshot_event.startswith("event: error"):
+                            return
+                except Exception:
+                    logger.exception("Failed to emit polling SSE task snapshot")
+                heartbeat = {"event_type": "heartbeat", "task_id": task_id}
+                yield f"event: heartbeat\ndata: {json.dumps(heartbeat, ensure_ascii=False)}\n\n"
+                continue
             event_type = event.get("event_type", "progress")
             data = json.dumps(event, ensure_ascii=False)
             yield f"event: {event_type}\ndata: {data}\n\n"

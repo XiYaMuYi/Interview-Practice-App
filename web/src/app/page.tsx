@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import axios from "axios";
+import api from "@/lib/api";
 import { ErrorState, LoadingState, EmptyState } from "@/components/states";
 import TaskStatusBadge from "@/components/TaskStatusBadge";
 import SourceBadge from "@/components/SourceBadge";
+import { useAuth } from "@/contexts/AuthContext";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -80,6 +81,9 @@ const formatDate = (iso: string) => {
 // ─── Page ────────────────────────────────────────────────────────────
 
 export default function HomePage() {
+  const { user, isLoading: authLoading, authConfig } = useAuth();
+  const isAuthEnabled = authConfig?.auth_enabled ?? true;
+  const canLoadOverview = !authLoading && (!isAuthEnabled || !!user);
   const [stats, setStats] = useState<StudyStats | null>(null);
   const [recentQuestions, setRecentQuestions] = useState<Question[]>([]);
   const [recentResumes, setRecentResumes] = useState<ResumeItem[]>([]);
@@ -89,11 +93,18 @@ export default function HomePage() {
   const loadOverview = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (!canLoadOverview) {
+      setStats(null);
+      setRecentQuestions([]);
+      setRecentResumes([]);
+      setLoading(false);
+      return;
+    }
     try {
       const [statsRes, questionsRes, resumesRes] = await Promise.allSettled([
-        axios.get<StudyStats>("/api/v1/study/stats"),
-        axios.get<ListResponse>("/api/v1/questions", { params: { page: 1, page_size: 5 } }),
-        axios.get<{ items: ResumeItem[] }>("/api/v1/resumes", { params: { page: 1, page_size: 3 } }),
+        api.get<StudyStats>("/api/v1/study/stats"),
+        api.get<ListResponse>("/api/v1/questions", { params: { page: 1, page_size: 5 } }),
+        api.get<{ items: ResumeItem[] }>("/api/v1/resumes", { params: { page: 1, page_size: 3 } }),
       ]);
 
       if (statsRes.status === "fulfilled") setStats(statsRes.value.data);
@@ -104,7 +115,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canLoadOverview]);
 
   useEffect(() => {
     loadOverview();
@@ -317,7 +328,7 @@ export default function HomePage() {
                   </div>
                   <div className="flex gap-2 shrink-0">
                     <Link
-                      href="/study"
+                      href="/interview"
                       className="btn-secondary px-3 py-1 text-xs"
                     >
                       开始面试

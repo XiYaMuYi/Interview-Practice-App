@@ -7,6 +7,7 @@ python-multipart>=0.0.9
 sqlmodel>=0.0.21
 asyncpg>=0.30.0
 alembic>=1.14.0
+pgvector>=0.2.5
 
 # Settings
 pydantic>=2.9.0
@@ -15,6 +16,7 @@ pydantic-settings>=2.5.0
 # Auth
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+bcrypt<4.1
 
 # LangGraph (for AI workflows)
 langgraph>=0.2.50

@@ -2,9 +2,11 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
-import axios from "axios";
+import api, { isAxiosError } from "@/lib/api";
+import { authFetch } from "@/lib/auth";
 import { LoadingState, ErrorState, EmptyState } from "@/components/states";
 import TaskStatusBadge from "@/components/TaskStatusBadge";
+import AuthRouteGuard from "@/components/AuthRouteGuard";
 
 interface ImportResult {
   status: string;
@@ -201,7 +203,7 @@ export default function ImportPage() {
   const fetchResumes = useCallback(async () => {
     setListLoading(true);
     try {
-      const res = await axios.get<{ items: ResumeRead[] }>("/api/v1/resumes");
+      const res = await api.get<{ items: ResumeRead[] }>("/api/v1/resumes");
       setSavedResumes(res.data.items);
     } catch {
       // silently ignore — list is optional
@@ -233,7 +235,7 @@ export default function ImportPage() {
 
     const recover = async () => {
       try {
-        const res = await fetch(`/api/v1/resumes/tasks/${saved.taskId}`, { signal: controller.signal });
+        const res = await authFetch(`/api/v1/resumes/tasks/${saved.taskId}`, { signal: controller.signal });
         if (!res.ok) {
           clearResumeStreamState();
           return;
@@ -267,8 +269,9 @@ export default function ImportPage() {
         setResumeStreamResumeId(saved.resumeId);
 
         // Reconnect SSE stream
-        const sseRes = await fetch(`/api/v1/resumes/${saved.resumeId}/parse-stream`, {
+        const sseRes = await authFetch(`/api/v1/resumes/${saved.resumeId}/parse-stream`, {
           method: "POST",
+          headers: { Accept: "text/event-stream" },
           signal: controller.signal,
         });
 
@@ -297,12 +300,13 @@ export default function ImportPage() {
               if (dataStr && eventType) {
                 try {
                   const data = JSON.parse(dataStr);
+                  const type = String(data.event_type || eventType || "message");
                   if (data.progress != null) setResumeStreamProgress(data.progress);
                   if (data.phase) setResumeStreamPhase(data.phase);
                   if (data.current) setResumeStreamMessage(data.current);
                   if (data.elapsed != null) setResumeStreamElapsed(Math.round(data.elapsed));
 
-                  if (eventType === "chunk_saved") {
+                  if (type === "chunk_saved") {
                     const chunk = { type: data.chunk_type || "section", label: data.label || data.chunk_type || "section" };
                     setResumeStreamSavedChunks(prev => [...prev, chunk]);
                     savedChunksRef.current = [...savedChunksRef.current, chunk];
@@ -320,14 +324,14 @@ export default function ImportPage() {
                     savedChunks: savedChunksRef.current,
                   });
 
-                  if (eventType === "done") {
+                  if (type === "done" || data.status === "done") {
                     setResumeStreamDone(true);
                     setResumeStreamPhase("done");
                     if (data.questions_generated != null) setResumeStreamQuestionsGenerated(data.questions_generated);
                     clearResumeStreamState();
                     await fetchResumes();
                     break;
-                  } else if (eventType === "error") {
+                  } else if (type === "error" || data.error) {
                     setResumeStreamError(data.error || "解析失败");
                     if (!data.recoverable) {
                       setResumeStreamDone(true);
@@ -371,7 +375,7 @@ export default function ImportPage() {
     try {
       const formData = new FormData();
       formData.append("text", text);
-      const res = await axios.post("/api/v1/import/text", formData, {
+      const res = await api.post("/api/v1/import/text", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setResult(res.data);
@@ -393,12 +397,12 @@ export default function ImportPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await axios.post("/api/v1/import/file", formData, {
+      const res = await api.post("/api/v1/import/file", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setQuestionFileResult(res.data);
     } catch (e: unknown) {
-      if (axios.isAxiosError(e)) {
+      if (isAxiosError(e)) {
         setQuestionFileError(e.response?.data?.detail ?? "文件上传失败，请检查网络连接或后端服务状态");
       } else {
         setQuestionFileError("文件上传失败，请检查网络连接或后端服务状态");
@@ -459,8 +463,9 @@ export default function ImportPage() {
     try {
       const formData = new FormData();
       formData.append("text", text);
-      const res = await fetch("/api/v1/import/text-stream", {
+      const res = await authFetch("/api/v1/import/text-stream", {
         method: "POST",
+        headers: { Accept: "text/event-stream" },
         body: formData,
         signal: controller.signal,
       });
@@ -472,6 +477,7 @@ export default function ImportPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let eventType = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -481,7 +487,6 @@ export default function ImportPage() {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        let eventType = "";
         let dataStr = "";
 
         for (const line of lines) {
@@ -492,16 +497,17 @@ export default function ImportPage() {
             if (dataStr && eventType) {
               try {
                 const data = JSON.parse(dataStr);
+                const type = String(data.event_type || eventType || "message");
                 if (data.progress != null) setStreamProgress(data.progress);
                 if (data.phase) setStreamPhase(data.phase);
                 if (data.current) setStreamMessage(data.current);
                 if (data.elapsed != null) setStreamElapsed(Math.round(data.elapsed));
                 if (data.total_generated != null) setStreamTotalGenerated(data.total_generated);
 
-                if (eventType === "done") {
+                if (type === "done" || data.status === "done") {
                   setStreamDone(true);
                   setStreamPhase("done");
-                } else if (eventType === "error") {
+                } else if (type === "error" || data.error) {
                   setStreamError(data.error || "提取失败");
                   if (!data.recoverable) {
                     setStreamDone(true);
@@ -595,7 +601,7 @@ export default function ImportPage() {
     setCustomResult(null);
     try {
       const parsed = JSON.parse(jsonText);
-      const res = await axios.post("/api/v1/questions/import", { questions: parsed });
+      const res = await api.post("/api/v1/questions/import", { questions: parsed });
       if (res.data.status === "validation_error") {
         setCustomError(`参数校验失败: ${JSON.stringify(res.data.errors)}`);
       } else {
@@ -609,7 +615,7 @@ export default function ImportPage() {
     } catch (e: unknown) {
       if (e instanceof SyntaxError) {
         setCustomError("JSON 格式无效，请先点击「格式验证」检查");
-      } else if (axios.isAxiosError(e)) {
+      } else if (isAxiosError(e)) {
         setCustomError(e.response?.data?.detail ?? "导入失败，请检查网络连接或后端服务状态");
       } else {
         setCustomError("导入失败，请重试");
@@ -642,8 +648,9 @@ export default function ImportPage() {
     let persistedTaskId: string | null = null;
 
     try {
-      const res = await fetch(`/api/v1/resumes/${resumeId}/parse-stream`, {
+      const res = await authFetch(`/api/v1/resumes/${resumeId}/parse-stream`, {
         method: "POST",
+        headers: { Accept: "text/event-stream" },
         signal: controller.signal,
       });
 
@@ -654,6 +661,7 @@ export default function ImportPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let eventType = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -663,7 +671,6 @@ export default function ImportPage() {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        let eventType = "";
         let dataStr = "";
 
         for (const line of lines) {
@@ -674,6 +681,7 @@ export default function ImportPage() {
             if (dataStr && eventType) {
               try {
                 const data = JSON.parse(dataStr);
+                const type = String(data.event_type || eventType || "message");
 
                 // Capture task_id from first event and persist it
                 if (!persistedTaskId && data.task_id) {
@@ -695,7 +703,7 @@ export default function ImportPage() {
                 if (data.current) setResumeStreamMessage(data.current);
                 if (data.elapsed != null) setResumeStreamElapsed(Math.round(data.elapsed));
 
-                if (eventType === "chunk_saved") {
+                if (type === "chunk_saved") {
                   const chunk = { type: data.chunk_type || "section", label: data.label || data.chunk_type || "section" };
                   setResumeStreamSavedChunks(prev => [...prev, chunk]);
                   savedChunksRef.current = [...savedChunksRef.current, chunk];
@@ -715,13 +723,13 @@ export default function ImportPage() {
                   });
                 }
 
-                if (eventType === "done") {
+                if (type === "done" || data.status === "done") {
                   setResumeStreamDone(true);
                   setResumeStreamPhase("done");
                   if (data.questions_generated != null) setResumeStreamQuestionsGenerated(data.questions_generated);
                   clearResumeStreamState();
                   await fetchResumes();
-                } else if (eventType === "error") {
+                } else if (type === "error" || data.error) {
                   setResumeStreamError(data.error || "解析失败");
                   if (!data.recoverable) {
                     setResumeStreamDone(true);
@@ -769,7 +777,7 @@ export default function ImportPage() {
       try {
         const formData = new FormData();
         formData.append("file", file);
-        const res = await axios.post<ResumeRead>("/api/v1/resumes/upload", formData, {
+        const res = await api.post<ResumeRead>("/api/v1/resumes/upload", formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
 
@@ -779,7 +787,7 @@ export default function ImportPage() {
         await triggerParseStream(resumeId);
         await fetchResumes();
       } catch (e: unknown) {
-        if (axios.isAxiosError(e)) {
+        if (isAxiosError(e)) {
           setUploadError(
             e.response?.data?.detail ?? "文件上传失败，请检查网络连接或后端服务状态"
           );
@@ -831,7 +839,7 @@ export default function ImportPage() {
     async (resumeId: string) => {
       if (!confirm("确定要删除这份简历吗？此操作不可撤销。")) return;
       try {
-        await axios.delete(`/api/v1/resumes/${resumeId}`);
+        await api.delete(`/api/v1/resumes/${resumeId}`);
         setSavedResumes((prev) => prev.filter((r) => r.id !== resumeId));
         if (uploadResult?.resume_id === resumeId) {
           setUploadResult(null);
@@ -878,7 +886,8 @@ export default function ImportPage() {
   // ── Render ───────────────────────────────────────────────────────
 
   return (
-    <div className="page-frame-tight">
+    <AuthRouteGuard>
+      <div className="page-frame-tight">
       <h1 className="page-title">导入</h1>
       <p className="page-subtitle">
         通过文本粘贴或简历上传，快速构建你的面试题库
@@ -1764,12 +1773,6 @@ export default function ImportPage() {
                       </p>
                     </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <Link
-                          href={`/import/${resume.id}`}
-                          className="btn-ghost"
-                        >
-                          查看详情
-                        </Link>
                         <button
                           onClick={() => handleReparse(resume.id)}
                           disabled={uploading || resumeStreaming}
@@ -1792,6 +1795,7 @@ export default function ImportPage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </AuthRouteGuard>
   );
 }

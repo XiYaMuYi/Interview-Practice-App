@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.domain.models import ExamAnswer, ExamSession, Question, StudyRecord
+from app.infra.data_isolation import UserContext, ensure_owned_by
 from app.infra.llm.gateway import LLMGateway
 
 logger = get_logger(__name__)
@@ -27,7 +28,7 @@ class ExamService:
     async def create_exam_session(
         self,
         *,
-        user_id: str | None,
+        user_ctx: UserContext | None = None,
         title: str | None,
         duration_minutes: int,
         question_count: int,
@@ -35,8 +36,18 @@ class ExamService:
         source_filter: str | None,
     ) -> dict:
         """Create a new exam session with selected questions."""
-        # Build question selection query
+        # Build question selection query - include public + user-owned
         q_stmt = select(Question).where(Question.deleted_at.is_(None))
+        # User isolation
+        if user_ctx and user_ctx.is_admin:
+            pass
+        elif user_ctx and user_ctx.is_anonymous:
+            q_stmt = q_stmt.where(Question.user_id.is_(None))
+        elif user_ctx:
+            from sqlalchemy import or_
+            q_stmt = q_stmt.where(
+                or_(Question.user_id == user_ctx.user_id, Question.user_id.is_(None))
+            )
 
         if difficulty_filter:
             if difficulty_filter == "easy":
@@ -49,18 +60,18 @@ class ExamService:
         if source_filter:
             q_stmt = q_stmt.where(Question.source_type == source_filter)
 
-        result = await self.session.exec(q_stmt)
-        all_questions = result.all()
+        selected = await self.session.scalars(q_stmt)
+        all_questions = list(selected)
 
         if not all_questions:
             raise ValueError("没有找到符合条件的题目")
 
         # Randomly select questions
-        selected = random.sample(all_questions, min(question_count, len(all_questions)))
-        question_ids = [q.id for q in selected]
+        sampled = random.sample(all_questions, min(question_count, len(all_questions)))
+        question_ids = [q.id for q in sampled]
 
         session_record = ExamSession(
-            user_id=user_id,
+            user_id=user_ctx.user_id if (user_ctx and not user_ctx.is_admin) else None,
             title=title or f"模拟考试 {time.strftime('%Y-%m-%d %H:%M')}",
             duration_minutes=duration_minutes,
             total_questions=len(question_ids),
@@ -69,7 +80,7 @@ class ExamService:
             question_ids=[str(qid) for qid in question_ids],
             status="pending",
         )
-        session_record = self.session.add(session_record)
+        self.session.add(session_record)
         await self.session.commit()
         await self.session.refresh(session_record)
 
@@ -90,22 +101,35 @@ class ExamService:
             "created_at": session_record.created_at.isoformat(),
         }
 
-    async def get_exam_session(self, session_id: UUID) -> dict | None:
+    async def get_exam_session(self, session_id: UUID, *, user_ctx: UserContext | None = None) -> dict | None:
         """Get exam session details."""
         exam = await self.session.get(ExamSession, session_id)
         if not exam:
             return None
+        # Ownership check
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                if exam.user_id is not None:
+                    return None
+            elif exam.user_id is not None and exam.user_id != user_ctx.user_id:
+                return None
 
         # Fetch questions
         question_ids = [UUID(qid) for qid in exam.question_ids]
         q_stmt = select(Question).where(Question.id.in_(question_ids))
-        q_result = await self.session.exec(q_stmt)
-        questions = q_result.all()
+        question_result = await self.session.scalars(q_stmt)
+        questions = list(question_result.all())
 
         # Fetch answers
         a_stmt = select(ExamAnswer).where(ExamAnswer.session_id == session_id)
-        a_result = await self.session.exec(a_stmt)
-        answers = {str(a.question_id): a for a in a_result.all()}
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                a_stmt = a_stmt.where(ExamAnswer.user_id.is_(None))
+            else:
+                from sqlalchemy import or_ as _or
+                a_stmt = a_stmt.where(_or(ExamAnswer.user_id == user_ctx.user_id, ExamAnswer.user_id.is_(None)))
+        answer_result = await self.session.scalars(a_stmt)
+        answers = {str(a.question_id): a for a in answer_result.all()}
 
         questions_data = []
         for q in questions:
@@ -118,6 +142,8 @@ class ExamService:
                 "domain_type": q.domain_type,
                 "answered": answer is not None and answer.user_answer is not None,
                 "score": float(answer.score) if answer and answer.score is not None else None,
+                "user_answer": answer.user_answer if answer else None,
+                "feedback": answer.feedback if answer else None,
             })
 
         return {
@@ -133,12 +159,25 @@ class ExamService:
             "created_at": exam.created_at.isoformat(),
         }
 
-    async def start_exam(self, session_id: UUID) -> dict:
+    async def start_exam(self, session_id: UUID, *, user_ctx: UserContext | None = None) -> dict:
         """Mark exam as started."""
         from datetime import datetime
         exam = await self.session.get(ExamSession, session_id)
         if not exam:
             raise ValueError("考试不存在")
+        # Ownership check
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                if exam.user_id is not None:
+                    raise ValueError("无权访问此考试")
+            elif exam.user_id is not None and exam.user_id != user_ctx.user_id:
+                raise ValueError("无权访问此考试")
+        if exam.status == "in_progress":
+            return {
+                "id": str(exam.id),
+                "status": exam.status,
+                "started_at": exam.started_at.isoformat() if exam.started_at else None,
+            }
         if exam.status != "pending":
             raise ValueError(f"考试状态不正确: {exam.status}")
 
@@ -155,20 +194,29 @@ class ExamService:
         session_id: UUID,
         question_id: UUID,
         user_answer: str,
+        *,
+        user_ctx: UserContext | None = None,
     ) -> dict:
         """Save or update an answer during exam."""
         # Verify session exists and is in progress
         exam = await self.session.get(ExamSession, session_id)
         if not exam or exam.status not in ("in_progress", "pending"):
             raise ValueError("考试不存在或未开始")
+        # Ownership check
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                if exam.user_id is not None:
+                    raise ValueError("无权访问此考试")
+            elif exam.user_id is not None and exam.user_id != user_ctx.user_id:
+                raise ValueError("无权访问此考试")
 
         # Check if answer exists
         a_stmt = select(ExamAnswer).where(
             ExamAnswer.session_id == session_id,
             ExamAnswer.question_id == question_id,
         )
-        a_result = await self.session.exec(a_stmt)
-        answer = a_result.first()
+        answer_result = await self.session.scalars(a_stmt)
+        answer = answer_result.first()
 
         if answer:
             answer.user_answer = user_answer
@@ -177,6 +225,7 @@ class ExamService:
             answer = ExamAnswer(
                 session_id=session_id,
                 question_id=question_id,
+                user_id=user_ctx.user_id if (user_ctx and not user_ctx.is_admin) else None,
                 user_answer=user_answer,
             )
             self.session.add(answer)
@@ -190,12 +239,19 @@ class ExamService:
             "saved": True,
         }
 
-    async def submit_exam(self, session_id: UUID) -> dict:
+    async def submit_exam(self, session_id: UUID, *, user_ctx: UserContext | None = None) -> dict:
         """Submit exam and start grading."""
         from datetime import datetime
         exam = await self.session.get(ExamSession, session_id)
         if not exam:
             raise ValueError("考试不存在")
+        # Ownership check
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                if exam.user_id is not None:
+                    raise ValueError("无权访问此考试")
+            elif exam.user_id is not None and exam.user_id != user_ctx.user_id:
+                raise ValueError("无权访问此考试")
 
         exam.status = "submitted"
         exam.submitted_at = datetime.utcnow()
@@ -204,25 +260,48 @@ class ExamService:
 
         return {"id": str(exam.id), "status": exam.status, "submitted_at": exam.submitted_at.isoformat()}
 
-    async def grade_exam(self, session_id: UUID) -> AsyncGenerator[dict, None]:
+    async def grade_exam(self, session_id: UUID, *, user_ctx: UserContext | None = None) -> AsyncGenerator[dict, None]:
         """Grade all answers in an exam session using LLM."""
         exam = await self.session.get(ExamSession, session_id)
         if not exam:
             raise ValueError("考试不存在")
+        # Ownership check
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                if exam.user_id is not None:
+                    raise ValueError("无权访问此考试")
+            elif exam.user_id is not None and exam.user_id != user_ctx.user_id:
+                raise ValueError("无权访问此考试")
 
         # Fetch all questions and answers
         question_ids = [UUID(qid) for qid in exam.question_ids]
         q_stmt = select(Question).where(Question.id.in_(question_ids))
-        q_result = await self.session.exec(q_stmt)
-        questions = {q.id: q for q in q_result.all()}
+        question_result = await self.session.scalars(q_stmt)
+        questions = {q.id: q for q in question_result.all()}
 
         a_stmt = select(ExamAnswer).where(ExamAnswer.session_id == session_id)
-        a_result = await self.session.exec(a_stmt)
-        answers = {a.question_id: a for a in a_result.all()}
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                a_stmt = a_stmt.where(ExamAnswer.user_id.is_(None))
+            else:
+                from sqlalchemy import or_ as _or
+                a_stmt = a_stmt.where(_or(ExamAnswer.user_id == user_ctx.user_id, ExamAnswer.user_id.is_(None)))
+        answer_result = await self.session.scalars(a_stmt)
+        answers = {a.question_id: a for a in answer_result.all()}
 
         total_questions = len(question_ids)
         total_score = 0.0
         graded_count = 0
+
+        yield {
+            "event": "grading_progress",
+            "graded": 0,
+            "total": total_questions,
+            "question_id": None,
+            "question_title": "Starting grading",
+            "score": None,
+            "feedback": "Grading started",
+        }
 
         for qid in question_ids:
             question = questions.get(qid)

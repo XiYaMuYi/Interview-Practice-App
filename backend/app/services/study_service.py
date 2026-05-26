@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.domain.models import KnowledgeNode, Question, QuestionKnowledgeNode, QuestionTag, StudyRecord, Tag
+from app.infra.data_isolation import UserContext
 from app.infra.repositories import StudyRecordRepository
 
 logger = get_logger(__name__)
@@ -28,9 +29,10 @@ class StudyService:
 
     # - Study Records -
 
-    async def create_study_record(self, data: dict) -> dict:
+    async def create_study_record(self, data: dict, *, user_ctx: UserContext | None = None) -> dict:
         """Record a study session."""
         record = StudyRecord(
+            user_id=user_ctx.user_id if (user_ctx and not user_ctx.is_admin) else None,
             question_id=data.get("question_id"),
             study_type=data.get("study_type", "practice"),
             user_answer=data.get("user_answer"),
@@ -51,6 +53,7 @@ class StudyService:
     async def get_study_records(
         self,
         *,
+        user_ctx: UserContext | None = None,
         question_id: UUID | None = None,
         study_type: str | None = None,
         offset: int = 0,
@@ -60,6 +63,15 @@ class StudyService:
         filters = {}
         if study_type:
             filters["study_type"] = study_type
+
+        # User isolation
+        if user_ctx and user_ctx.is_admin:
+            pass
+        elif user_ctx and user_ctx.is_anonymous:
+            filters["__user_filter_mode"] = "public_only"
+        elif user_ctx:
+            filters["__user_filter_mode"] = "owned_or_public"
+            filters["__user_id"] = user_ctx.user_id
 
         records = await self.study_repo.list(offset=offset, limit=limit, filters=filters)
 
@@ -82,6 +94,7 @@ class StudyService:
     async def get_study_records_with_count(
         self,
         *,
+        user_ctx: UserContext | None = None,
         question_id: UUID | None = None,
         study_type: str | None = None,
         page: int = 1,
@@ -92,6 +105,15 @@ class StudyService:
         filters = {}
         if study_type:
             filters["study_type"] = study_type
+
+        # User isolation
+        if user_ctx and user_ctx.is_admin:
+            pass
+        elif user_ctx and user_ctx.is_anonymous:
+            filters["__user_filter_mode"] = "public_only"
+        elif user_ctx:
+            filters["__user_filter_mode"] = "owned_or_public"
+            filters["__user_id"] = user_ctx.user_id
 
         records, total = await self.study_repo.list_with_count(
             offset=offset, limit=page_size, filters=filters
@@ -109,6 +131,16 @@ class StudyService:
             )
             if study_type:
                 q_filter_stmt = q_filter_stmt.where(StudyRecord.study_type == study_type)
+            # User isolation
+            if user_ctx and user_ctx.is_admin:
+                pass
+            elif user_ctx and user_ctx.is_anonymous:
+                q_filter_stmt = q_filter_stmt.where(StudyRecord.user_id.is_(None))
+            elif user_ctx:
+                from sqlalchemy import or_ as _or
+                q_filter_stmt = q_filter_stmt.where(
+                    _or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None))
+                )
             total = (await self.session.exec(q_filter_stmt)).scalar_one()
 
         # Batch-fetch questions to avoid N+1
@@ -135,11 +167,14 @@ class StudyService:
             result.append(d)
         return result, total
 
-    async def get_records_for_question(self, question_id: UUID) -> list[dict]:
-        """Get all study records for a specific question."""
-        records = await self.study_repo.list(
-            filters={"question_id": question_id}, limit=1000
-        )
+    async def get_records_for_question(self, question_id: UUID, *, user_ctx: UserContext | None = None) -> list[dict]:
+        """Get study records for a specific question, scoped to the current user."""
+        filters: dict = {"question_id": question_id}
+        if user_ctx and not user_ctx.is_admin:
+            filters["__user_filter_mode"] = "public_only" if user_ctx.is_anonymous else "owned_or_public"
+            if not user_ctx.is_anonymous:
+                filters["__user_id"] = user_ctx.user_id
+        records = await self.study_repo.list(filters=filters, limit=1000)
         return [self._record_to_dict(r) for r in records]
 
     # - Review Scheduling (SM-2) -
@@ -151,11 +186,17 @@ class StudyService:
         quality: int,
         user_answer: str | None = None,
         duration: int | None = None,
+        user_ctx: UserContext | None = None,
     ) -> dict:
         """Record a review and calculate next review date using simplified SM-2."""
-        # Find the last review record for this question
+        # Find the last review record for this question (filtered by user)
+        last_filters: dict = {"question_id": question_id, "study_type": "review"}
+        if user_ctx and not user_ctx.is_admin:
+            last_filters["__user_filter_mode"] = "public_only" if user_ctx.is_anonymous else "owned_or_public"
+            if not user_ctx.is_anonymous:
+                last_filters["__user_id"] = user_ctx.user_id
         last_records = await self.study_repo.list(
-            filters={"question_id": question_id, "study_type": "review"},
+            filters=last_filters,
             offset=0,
             limit=1,
         )
@@ -171,6 +212,7 @@ class StudyService:
         review_result = "mastered" if quality >= 4 else "needs_reinforcement"
 
         record = StudyRecord(
+            user_id=user_ctx.user_id if (user_ctx and not user_ctx.is_admin) else None,
             question_id=question_id,
             study_type="review",
             user_answer=user_answer,
@@ -189,7 +231,7 @@ class StudyService:
         )
         return self._record_to_dict(record)
 
-    async def get_review_list(self, *, limit: int = 50) -> list[dict]:
+    async def get_review_list(self, *, user_ctx: UserContext | None = None, limit: int = 50) -> list[dict]:
         """Get questions that are due for review."""
         now = datetime.utcnow()
         stmt = (
@@ -203,9 +245,16 @@ class StudyService:
                 StudyRecord.next_review_at.isnot(None),
                 StudyRecord.next_review_at <= now,
             )
-            .order_by(StudyRecord.next_review_at.asc())
-            .limit(limit)
         )
+        # User isolation
+        if user_ctx and user_ctx.is_admin:
+            pass
+        elif user_ctx and user_ctx.is_anonymous:
+            stmt = stmt.where(StudyRecord.user_id.is_(None))
+        elif user_ctx:
+            from sqlalchemy import or_ as _or
+            stmt = stmt.where(_or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None)))
+        stmt = stmt.order_by(StudyRecord.next_review_at.asc()).limit(limit)
         result = await self.session.exec(stmt)
         due_records = result.all()
 
@@ -234,7 +283,7 @@ class StudyService:
         return items
 
     async def get_review_list_with_count(
-        self, *, page: int = 1, page_size: int = 20
+        self, *, user_ctx: UserContext | None = None, page: int = 1, page_size: int = 20
     ) -> tuple[list[dict], int]:
         """Get questions due for review with real total count and pagination."""
         now = datetime.utcnow()
@@ -251,6 +300,14 @@ class StudyService:
                 StudyRecord.next_review_at <= now,
             )
         )
+        # User isolation
+        if user_ctx and user_ctx.is_admin:
+            pass
+        elif user_ctx and user_ctx.is_anonymous:
+            count_stmt = count_stmt.where(StudyRecord.user_id.is_(None))
+        elif user_ctx:
+            from sqlalchemy import or_ as _or
+            count_stmt = count_stmt.where(_or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None)))
         total = (await self.session.exec(count_stmt)).scalar_one()
 
         # Data query with pagination
@@ -270,6 +327,14 @@ class StudyService:
             .offset(offset)
             .limit(page_size)
         )
+        # User isolation
+        if user_ctx and user_ctx.is_admin:
+            pass
+        elif user_ctx and user_ctx.is_anonymous:
+            stmt = stmt.where(StudyRecord.user_id.is_(None))
+        elif user_ctx:
+            from sqlalchemy import or_ as _or
+            stmt = stmt.where(_or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None)))
         result = await self.session.exec(stmt)
         due_records = result.all()
 
@@ -299,20 +364,32 @@ class StudyService:
 
     # - Statistics -
 
-    async def get_stats(self) -> dict:
+    async def get_stats(self, *, user_ctx: UserContext | None = None) -> dict:
         """Get aggregated study statistics."""
+        # Base user filter
+        user_conditions = []
+        if user_ctx and user_ctx.is_admin:
+            pass
+        elif user_ctx and user_ctx.is_anonymous:
+            user_conditions.append(StudyRecord.user_id.is_(None))
+        elif user_ctx:
+            from sqlalchemy import or_ as _or
+            user_conditions.append(
+                _or(StudyRecord.user_id == user_ctx.user_id, StudyRecord.user_id.is_(None))
+            )
+
         # Total sessions
-        total_stmt = select(func.count()).select_from(StudyRecord)
+        total_stmt = select(func.count()).select_from(StudyRecord).where(*user_conditions)
         total_sessions = (await self.session.exec(total_stmt)).one()[0]
 
         # By type
         review_stmt = select(func.count()).select_from(StudyRecord).where(
-            StudyRecord.study_type == "review"
+            StudyRecord.study_type == "review", *user_conditions
         )
         total_reviews = (await self.session.exec(review_stmt)).one()[0]
 
         practice_stmt = select(func.count()).select_from(StudyRecord).where(
-            StudyRecord.study_type == "practice"
+            StudyRecord.study_type == "practice", *user_conditions
         )
         total_practice = (await self.session.exec(practice_stmt)).one()[0]
 
@@ -320,7 +397,7 @@ class StudyService:
         avg_stmt = (
             select(func.avg(StudyRecord.ai_score))
             .select_from(StudyRecord)
-            .where(StudyRecord.ai_score.isnot(None))
+            .where(StudyRecord.ai_score.isnot(None), *user_conditions)
         )
         avg_result = (await self.session.exec(avg_stmt)).one()[0]
         average_score = round(float(avg_result), 2) if avg_result else None
@@ -329,6 +406,7 @@ class StudyService:
         mastered_stmt = select(func.count(func.distinct(StudyRecord.question_id))).where(
             StudyRecord.review_result == "mastered",
             StudyRecord.question_id.isnot(None),
+            *user_conditions,
         )
         questions_mastered = (await self.session.exec(mastered_stmt)).one()[0]
 
@@ -340,6 +418,7 @@ class StudyService:
                 StudyRecord.question_id.isnot(None),
                 StudyRecord.next_review_at.isnot(None),
                 StudyRecord.next_review_at <= datetime.utcnow(),
+                *user_conditions,
             )
         )
         questions_pending = (await self.session.exec(pending_stmt)).one()[0]
@@ -392,6 +471,8 @@ class StudyService:
         session_id: str | None = None,
         days: int = 7,
         include_feedback: bool = True,
+        *,
+        user_ctx: UserContext | None = None,
     ) -> tuple[UUID, AsyncGenerator[str, None]]:
         """Generate a review report with aggregated study statistics.
 
@@ -602,6 +683,8 @@ class StudyService:
         focus_areas: list[str] | None = None,
         max_items: int = 20,
         strategy: str = "weak_first",
+        *,
+        user_ctx: UserContext | None = None,
     ) -> tuple[UUID, AsyncGenerator[str, None]]:
         """Generate a learning path based on weak areas.
 

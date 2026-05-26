@@ -3,6 +3,7 @@
 from fastapi import APIRouter, FastAPI
 
 from app.api.v1.routes import (
+    admin_routes,
     ai_routes,
     auth_routes,
     chat_routes,
@@ -21,6 +22,7 @@ v1_router = APIRouter(prefix="/api/v1")
 
 
 def register_routes(app: FastAPI) -> None:
+    v1_router.include_router(admin_routes.router, prefix="/admin", tags=["admin"])
     v1_router.include_router(auth_routes.router, prefix="/auth", tags=["auth"])
     v1_router.include_router(import_routes.router, prefix="/import", tags=["import"])
     v1_router.include_router(question_routes.router, prefix="/questions", tags=["questions"])

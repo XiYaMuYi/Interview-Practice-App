@@ -38,7 +38,7 @@ interface UseTaskEventsReturn {
 
 export function useTaskEvents(
   taskId: string | null,
-  options?: { onDone?: (finalState: { status: string; progress: number }) => void }
+  options?: { onDone?: (finalState: { status: string; progress: number; content: string }) => void }
 ): UseTaskEventsReturn {
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [progress, setProgress] = useState(0);
@@ -122,29 +122,36 @@ export function useTaskEvents(
             } else if (line.startsWith('data:')) {
               try {
                 const data = JSON.parse(line.slice(5).trim());
-                const event: TaskEvent = { event_type: eventType || 'message', ...data };
+                const type = String(data.event_type || eventType || 'message');
+                const event: TaskEvent = { ...data, event_type: type };
                 setEvents(prev => [...prev, event]);
 
                 if (data.progress != null) setProgress(data.progress);
                 if (data.phase) setCurrentPhase(data.phase);
+                if (data.current_phase) setCurrentPhase(data.current_phase);
                 if (data.current) setCurrentMessage(data.current);
                 if (data.elapsed != null) setElapsed(Math.round(data.elapsed));
                 if (data.total_generated != null) setTotalGenerated(data.total_generated);
                 if (data.status) setStatus(data.status);
 
-                if (eventType === 'token' && data.token) {
-                  contentRef.current += data.token;
+                if (data.token) {
+                  contentRef.current += String(data.token);
                   setAccumulatedContent(contentRef.current);
                 }
 
-                if (eventType === 'done') {
+                if (data.content) {
+                  contentRef.current = String(data.content);
+                  setAccumulatedContent(contentRef.current);
+                }
+
+                if (type === 'done' || data.status === 'done') {
                   doneRef.current = true;
                   setProgress(1);
                   // Poll DB to confirm final state
                   pollDbStatus(taskId);
-                  onDoneRef.current?.({ status: data.status || 'done', progress: 1 });
+                  onDoneRef.current?.({ status: data.status || 'done', progress: 1, content: contentRef.current });
                   break;
-                } else if (eventType === 'error') {
+                } else if (type === 'error' || data.error) {
                   setError(data.error || 'Unknown error');
                   setIsRecoverable(!!data.recoverable);
                   if (!data.recoverable) {

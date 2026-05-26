@@ -7,7 +7,7 @@ from app.services import health_service as svc
 
 logger = get_logger(__name__)
 
-router = APIRouter(tags=["health"])
+router = APIRouter(prefix="/api/v1", tags=["health"])
 
 
 @router.get("/health")

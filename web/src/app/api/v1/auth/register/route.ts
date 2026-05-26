@@ -1,0 +1,24 @@
+import { NextRequest, NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const res = await fetch(`${BACKEND}/api/v1/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    const text = await res.text();
+    let data: unknown = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+    return NextResponse.json(data ?? {}, { status: res.status });
+  } catch (err) {
+    return NextResponse.json({ error: "Auth register failed" }, { status: 502 });
+  }
+}

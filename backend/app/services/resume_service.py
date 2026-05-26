@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import AsyncGenerator
 from uuid import UUID
 
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.domain.models import Resume, ResumeExperience
 from app.infra.cache.cache_service import TTL_SUMMARY, delete_cache, get_cache, set_cache
+from app.infra.data_isolation import UserContext, ensure_owned_by
 from app.infra.events.event_publisher import event_publisher
 from app.infra.events.event_types import TASK_DONE
 from app.infra.llm.gateway import llm_gateway
@@ -143,7 +145,7 @@ class ResumeService:
 
     # ── Upload ──────────────────────────────────────────────────────
 
-    async def upload_resume(self, file_name: str, content: bytes, *, user_id: str | None = None) -> Resume:
+    async def upload_resume(self, file_name: str, content: bytes, *, user_ctx: UserContext | None = None) -> Resume:
         """Save uploaded file and create a resume record."""
         relative_path = await storage.save(file_name, content, subfolder="resumes")
         absolute_path = storage.absolute_path(relative_path)
@@ -161,7 +163,7 @@ class ResumeService:
             logger.warning(f"Unsupported file type: {suffix}")
 
         resume = Resume(
-            user_id=user_id,
+            user_id=user_ctx.user_id if user_ctx else None,
             file_name=file_name,
             file_path=relative_path,
             source_type="upload",
@@ -172,11 +174,13 @@ class ResumeService:
 
     # ── Parse ───────────────────────────────────────────────────────
 
-    async def parse_resume(self, resume_id: UUID) -> dict:
+    async def parse_resume(self, resume_id: UUID, *, user_ctx: UserContext | None = None) -> dict:
         """Parse a resume using LLM and extract structured data."""
         resume = await self.resume_repo.get_by_id(resume_id)
         if resume is None or resume.deleted_at is not None:
             raise NotFoundError("Resume", str(resume_id))
+        if user_ctx:
+            ensure_owned_by(user_ctx, resume.user_id, "resume")
 
         # Check cache first
         cache_key = f"app:resume:summary:{resume_id}"
@@ -274,6 +278,7 @@ class ResumeService:
         self,
         resume_id: UUID,
         *,
+        user_ctx: UserContext | None = None,
         generate_questions: bool = False,
         max_questions: int = 20,
     ) -> tuple[UUID, AsyncGenerator]:
@@ -301,6 +306,8 @@ class ResumeService:
         resume = await self.resume_repo.get_by_id(resume_id)
         if resume is None or resume.deleted_at is not None:
             raise NotFoundError("Resume", str(resume_id))
+        if user_ctx:
+            ensure_owned_by(user_ctx, resume.user_id, "resume")
 
         if not resume.raw_text:
             raise NotFoundError("Resume has no extracted text", str(resume_id))
@@ -512,6 +519,7 @@ class ResumeService:
                             task_type="resume_parse_with_questions",
                             max_questions=max_questions,
                             start_time=start_time,
+                            user_ctx=user_ctx,
                         ):
                             yield event
 
@@ -542,7 +550,7 @@ class ResumeService:
 
     # ── Async (Queue-based) Parse ─────────────────────────────────────
 
-    async def parse_resume_stream_async(self, resume_id: UUID) -> dict:
+    async def parse_resume_stream_async(self, resume_id: UUID, *, user_ctx: UserContext | None = None) -> dict:
         """Submit resume parsing to RabbitMQ queue instead of synchronous SSE.
 
         Returns a task_id that can be used to track progress.
@@ -587,6 +595,7 @@ class ResumeService:
         task_type: str = "generate_questions",
         max_questions: int = 20,
         start_time: float,
+        user_ctx: UserContext | None = None,
     ) -> AsyncGenerator[str, None]:
         """Shared SSE generator for resume-driven question generation.
 
@@ -636,6 +645,7 @@ class ResumeService:
                         raw_text[:200],
                         source_type="resume",
                         source_ref=str(resume_id),
+                        user_ctx=user_ctx,
                     )
                     total_questions += 1
                     yield _sse("question_saved", {
@@ -684,28 +694,37 @@ class ResumeService:
 
     # ── CRUD ────────────────────────────────────────────────────────
 
-    async def get_resume(self, resume_id: UUID) -> Resume:
+    async def get_resume(self, resume_id: UUID, *, user_ctx: UserContext | None = None) -> Resume:
         resume = await self.resume_repo.get_by_id(resume_id)
         if resume is None or resume.deleted_at is not None:
             raise NotFoundError("Resume", str(resume_id))
+        if user_ctx:
+            ensure_owned_by(user_ctx, resume.user_id, "resume")
         return resume
 
     async def list_resumes(
         self,
         *,
+        user_ctx: UserContext | None = None,
         offset: int = 0,
         limit: int = 50,
     ) -> list[Resume]:
+        filters: dict = {"deleted_at": None}
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                filters["user_id"] = None
+            else:
+                filters["user_id"] = user_ctx.user_id
         return list(
             await self.resume_repo.list(
-                filters={"deleted_at": None},
+                filters=filters,
                 offset=offset,
                 limit=limit,
             )
         )
 
     async def list_resumes_with_count(
-        self, *, page: int = 1, page_size: int = 20, user_id: str | None = None
+        self, *, page: int = 1, page_size: int = 20, user_ctx: UserContext | None = None
     ) -> tuple[list[Resume], int]:
         """List resumes with real total count."""
         from sqlalchemy import func
@@ -719,8 +738,11 @@ class ResumeService:
             .select_from(Resume)
             .where(Resume.deleted_at.is_(None))
         )
-        if user_id is not None:
-            count_stmt = count_stmt.where(Resume.user_id == user_id)
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                count_stmt = count_stmt.where(Resume.user_id.is_(None))
+            else:
+                count_stmt = count_stmt.where(Resume.user_id == user_ctx.user_id)
         total = (await self.session.exec(count_stmt)).scalar_one()
 
         # Data query
@@ -733,12 +755,20 @@ class ResumeService:
             .limit(page_size)
             .order_by(Resume.created_at.desc())
         )
-        if user_id is not None:
-            data_stmt = data_stmt.where(Resume.user_id == user_id)
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                data_stmt = data_stmt.where(Resume.user_id.is_(None))
+            else:
+                data_stmt = data_stmt.where(Resume.user_id == user_ctx.user_id)
         result = await self.session.exec(data_stmt)
         return list(result.scalars().all()), total
 
-    async def delete_resume(self, resume_id: UUID) -> bool:
+    async def delete_resume(self, resume_id: UUID, *, user_ctx: UserContext | None = None) -> bool:
+        resume = await self.resume_repo.get_by_id(resume_id)
+        if resume is None:
+            return False
+        if user_ctx:
+            ensure_owned_by(user_ctx, resume.user_id, "resume")
         return await self.resume_repo.soft_delete(resume_id)
 
     async def find_by_user_and_hash(self, user_id: str, file_hash: str) -> Resume | None:
@@ -756,6 +786,7 @@ class ResumeService:
         self,
         resume_id: UUID,
         *,
+        user_ctx: UserContext | None = None,
         count: int = 10,
     ) -> tuple[UUID, AsyncGenerator[str, None]]:
         """Regenerate interview questions from resume_experiences via SSE stream."""
@@ -770,6 +801,8 @@ class ResumeService:
         resume = await self.resume_repo.get_by_id(resume_id)
         if resume is None or resume.deleted_at is not None:
             raise NotFoundError("Resume", str(resume_id))
+        if user_ctx:
+            ensure_owned_by(user_ctx, resume.user_id, "resume")
 
         # Fetch experiences
         exps = await self.experience_repo.list(filters={"resume_id": resume_id})
@@ -813,6 +846,7 @@ class ResumeService:
                 task_type="regenerate_questions",
                 max_questions=count,
                 start_time=start_time,
+                user_ctx=user_ctx,
             ),
         )
 
@@ -820,6 +854,7 @@ class ResumeService:
         self,
         resume_id: UUID,
         *,
+        user_ctx: UserContext | None = None,
         max_questions: int = 20,
     ) -> tuple[UUID, AsyncGenerator[str, None]]:
         """Generate interview questions from a parsed resume via SSE stream.
@@ -836,6 +871,8 @@ class ResumeService:
         resume = await self.resume_repo.get_by_id(resume_id)
         if resume is None or resume.deleted_at is not None:
             raise NotFoundError("Resume", str(resume_id))
+        if user_ctx:
+            ensure_owned_by(user_ctx, resume.user_id, "resume")
 
         if resume.parse_status != "parsed":
             raise ValueError(
@@ -882,6 +919,7 @@ class ResumeService:
                 task_type="resume_generate_questions",
                 max_questions=max_questions,
                 start_time=start_time,
+                user_ctx=user_ctx,
             ),
         )
 

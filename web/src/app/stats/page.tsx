@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import axios from "axios";
+import api from "@/lib/api";
 import { EmptyState } from "@/components/states";
 import { Pagination } from "@/components/pagination";
 import SourceBadge from "@/components/SourceBadge";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { usePagination } from "@/hooks/usePagination";
 import type { PaginatedData } from "@/hooks/usePaginatedQuery";
+import AuthRouteGuard from "@/components/AuthRouteGuard";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -117,7 +118,7 @@ export default function StatsPage() {
   const loadSourceBreakdown = useCallback(async () => {
     setLoadingSource(true);
     try {
-      const res = await axios.get("/api/v1/study/stats/by-source");
+      const res = await api.get("/api/v1/study/stats/by-source");
       if (res.data && typeof res.data === "object") {
         setSourceBreakdown(res.data);
       }
@@ -134,7 +135,7 @@ export default function StatsPage() {
       setError(null);
       try {
         const [statsRes] = await Promise.allSettled([
-          axios.get<StudyStats>("/api/v1/study/stats"),
+          api.get<StudyStats>("/api/v1/study/stats"),
         ]);
 
         if (statsRes.status === "fulfilled") setStats(statsRes.value.data);
@@ -173,7 +174,8 @@ export default function StatsPage() {
   };
 
   return (
-    <div className="page-frame-narrow">
+    <AuthRouteGuard>
+      <div className="page-frame-narrow">
       <h1 className="page-title">学习统计</h1>
       <p className="page-subtitle">数据面板追踪你的练习进度和表现，看到自己的进步</p>
 
@@ -303,6 +305,7 @@ export default function StatsPage() {
           </>
         )}
       </div>
-    </div>
+      </div>
+    </AuthRouteGuard>
   );
 }

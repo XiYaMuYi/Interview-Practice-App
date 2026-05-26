@@ -2,11 +2,11 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, get_user_context, UserContext
 from app.common.pagination import build_paginated_response
 from app.domain.schemas import (
     LearningPathRequest,
@@ -34,17 +34,18 @@ def _study_record_response(record: dict) -> StudyRecordResponse:
 
 
 @router.post("/records", response_model=StudyRecordResponse)
-async def create_study_record(session: DbSession, data: StudySessionCreate):
+async def create_study_record(session: DbSession, data: StudySessionCreate, user_ctx: UserContext = Depends(get_user_context)):
     """Record a study session."""
     service = StudyService(session)
     record_data = data.model_dump()
-    record = await service.create_study_record(record_data)
+    record = await service.create_study_record(record_data, user_ctx=user_ctx)
     return _study_record_response(record)
 
 
 @router.get("/records")
 async def list_study_records(
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
     question_id: UUID | None = Query(None),
     study_type: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -53,6 +54,7 @@ async def list_study_records(
     """List study records with optional filters."""
     service = StudyService(session)
     records, total = await service.get_study_records_with_count(
+        user_ctx=user_ctx,
         question_id=question_id,
         study_type=study_type,
         page=page,
@@ -67,15 +69,15 @@ async def list_study_records(
 
 
 @router.get("/records/{question_id}")
-async def get_question_records(session: DbSession, question_id: UUID):
+async def get_question_records(session: DbSession, question_id: UUID, user_ctx: UserContext = Depends(get_user_context)):
     """Get all study records for a specific question."""
     service = StudyService(session)
-    records = await service.get_records_for_question(question_id)
+    records = await service.get_records_for_question(question_id, user_ctx=user_ctx)
     return {"question_id": str(question_id), "total": len(records), "items": records}
 
 
 @router.post("/review", response_model=StudyRecordResponse)
-async def record_review(session: DbSession, data: ReviewRequest):
+async def record_review(session: DbSession, data: ReviewRequest, user_ctx: UserContext = Depends(get_user_context)):
     """Record a review and calculate next review date (SM-2 simplified)."""
     service = StudyService(session)
     record = await service.record_review(
@@ -83,6 +85,7 @@ async def record_review(session: DbSession, data: ReviewRequest):
         quality=data.quality,
         user_answer=data.user_answer,
         duration=data.duration_seconds,
+        user_ctx=user_ctx,
     )
     return _study_record_response(record)
 
@@ -90,12 +93,14 @@ async def record_review(session: DbSession, data: ReviewRequest):
 @router.get("/review-list")
 async def get_review_list(
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """Get questions due for review."""
     service = StudyService(session)
     items, total = await service.get_review_list_with_count(
+        user_ctx=user_ctx,
         page=page,
         page_size=page_size,
     )
@@ -109,10 +114,10 @@ async def get_review_list(
 
 
 @router.get("/stats", response_model=StudyStatsResponse)
-async def get_study_stats(session: DbSession):
+async def get_study_stats(session: DbSession, user_ctx: UserContext = Depends(get_user_context)):
     """Get aggregated study statistics."""
     service = StudyService(session)
-    stats = await service.get_stats()
+    stats = await service.get_stats(user_ctx=user_ctx)
     return StudyStatsResponse(**stats)
 
 
@@ -133,13 +138,14 @@ async def get_stats_by_source(session: DbSession):
 
 
 @router.post("/review-report/generate-stream")
-async def generate_review_report_stream(session: DbSession, data: ReviewReportRequest):
+async def generate_review_report_stream(session: DbSession, data: ReviewReportRequest, user_ctx: UserContext = Depends(get_user_context)):
     """Generate a review report via SSE stream."""
     service = StudyService(session)
     task_id, event_gen = await service.generate_review_report_stream(
         session_id=data.session_id,
         days=data.days,
         include_feedback=data.include_feedback,
+        user_ctx=user_ctx,
     )
     return StreamingResponse(
         event_gen,
@@ -149,13 +155,14 @@ async def generate_review_report_stream(session: DbSession, data: ReviewReportRe
 
 
 @router.post("/learning-path/generate-stream")
-async def generate_learning_path_stream(session: DbSession, data: LearningPathRequest):
+async def generate_learning_path_stream(session: DbSession, data: LearningPathRequest, user_ctx: UserContext = Depends(get_user_context)):
     """Generate a learning path via SSE stream."""
     service = StudyService(session)
     task_id, event_gen = await service.generate_learning_path_stream(
         focus_areas=data.focus_areas,
         max_items=data.max_items,
         strategy=data.strategy,
+        user_ctx=user_ctx,
     )
     return StreamingResponse(
         event_gen,

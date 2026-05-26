@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import axios from "axios";
+import api, { isAxiosError } from "@/lib/api";
 
 export interface PaginatedData<T> {
   items: T[];
@@ -21,6 +21,7 @@ export function usePaginatedQuery<T = unknown>(
   options: UsePaginatedQueryOptions<T>
 ) {
   const { url, filters = {}, pageSize = 20, enabled = true } = options;
+  const filtersKey = JSON.stringify(filters);
 
   const [data, setData] = useState<T[]>([]);
   const [total, setTotal] = useState(0);
@@ -57,7 +58,7 @@ export function usePaginatedQuery<T = unknown>(
           params[key] = v;
         }
       }
-      const res = await axios.get<PaginatedData<T>>(url, { params });
+      const res = await api.get<PaginatedData<T>>(url, { params });
       const result = options.onDataTransform
         ? options.onDataTransform(res.data)
         : res.data;
@@ -66,7 +67,7 @@ export function usePaginatedQuery<T = unknown>(
       setTotalPages(result.total_pages);
     } catch (e: unknown) {
       const message =
-        axios.isAxiosError(e) && e.response?.data?.detail
+        isAxiosError(e) && e.response?.data?.detail
           ? e.response.data.detail
           : "Failed to fetch data";
       setError(String(message));
@@ -74,7 +75,7 @@ export function usePaginatedQuery<T = unknown>(
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, currentPageSize, url, enabled]);
+  }, [page, currentPageSize, url, enabled, filtersKey]);
 
   useEffect(() => {
     fetchData();

@@ -8,6 +8,7 @@ from app.core.exceptions import ParseError
 from app.core.logging import get_logger
 from app.domain.enums import ParseStatus, SourceType
 from app.domain.models import File, Question, QuestionKnowledgeNode
+from app.infra.data_isolation import UserContext, ensure_owned_by
 from app.infra.events.event_publisher import event_publisher
 from app.infra.events.event_types import CHUNK_PROCESSED, QUESTION_GENERATED
 from app.infra.llm.gateway import llm_gateway
@@ -96,7 +97,7 @@ class ImportService:
 
     # ── Text paste import ─────────────────────────────────────────
 
-    async def import_text(self, text: str, *, source_type: str = "paste") -> dict:
+    async def import_text(self, text: str, *, source_type: str = "paste", user_ctx: UserContext | None = None) -> dict:
         """Import questions from pasted text."""
         if not text.strip():
             raise ParseError("Empty text provided")
@@ -117,7 +118,7 @@ class ImportService:
         saved_questions = []
         for q_data in extracted:
             try:
-                question = await self._save_question(q_data, text[:200], source_type=source_type)
+                question = await self._save_question(q_data, text[:200], source_type=source_type, user_ctx=user_ctx)
                 saved_questions.append(question)
             except Exception as e:
                 logger.warning(f"Failed to save question (non-fatal): {e}")
@@ -132,7 +133,7 @@ class ImportService:
     # ── Streaming text import ─────────────────────────────────────
 
     async def import_text_stream(
-        self, text: str, source_type: str = "paste"
+        self, text: str, source_type: str = "paste", user_ctx: UserContext | None = None
     ) -> tuple[UUID, "AsyncGenerator[str, None]"]:
         """Stream text import with SSE events.
 
@@ -204,7 +205,7 @@ class ImportService:
                         for q_data in extracted:
                             try:
                                 question = await self._save_question(
-                                    q_data, chunk[:200], source_type=source_type
+                                    q_data, chunk[:200], source_type=source_type, user_ctx=user_ctx
                                 )
                                 total_questions += 1
                                 yield _sse("question_saved", {
@@ -291,7 +292,7 @@ class ImportService:
 
     # ── File upload import ────────────────────────────────────────
 
-    async def import_file(self, file_name: str, content: bytes) -> dict:
+    async def import_file(self, file_name: str, content: bytes, *, user_ctx: UserContext | None = None) -> dict:
         """Import questions from an uploaded file."""
         # 1. Save file
         relative_path = await storage.save(file_name, content)
@@ -315,6 +316,7 @@ class ImportService:
         else:
             # 3. Create new file record (pending status)
             file_record = File(
+                user_id=user_ctx.user_id if user_ctx else None,
                 file_name=file_name,
                 file_path=relative_path,
                 file_type=absolute_path.suffix.lower().lstrip("."),
@@ -344,7 +346,7 @@ class ImportService:
 
         saved_questions = []
         for q_data in extracted:
-            question = await self._save_question(q_data, text[:200], source_type=SourceType.upload.value, source_ref=str(file_record.id))
+            question = await self._save_question(q_data, text[:200], source_type=SourceType.upload.value, source_ref=str(file_record.id), user_ctx=user_ctx)
             saved_questions.append(question)
 
         return {
@@ -471,6 +473,7 @@ class ImportService:
         *,
         source_type: str = "paste",
         source_ref: str | None = None,
+        user_ctx: UserContext | None = None,
     ) -> Question:
         """Persist a single extracted question to the database.
 
@@ -512,6 +515,7 @@ class ImportService:
                 return existing_resume[0]
 
         question = Question(
+            user_id=user_ctx.user_id if user_ctx else None,
             title=title[:500],
             content=content,
             content_hash=content_hash,
@@ -526,9 +530,34 @@ class ImportService:
         )
         return await self.question_repo.create(question)
 
+    # ── File listing / ownership ─────────────────────────────────────
+
+    async def list_files(self, *, user_ctx: UserContext | None = None, offset: int = 0, limit: int = 50) -> list[File]:
+        """List files filtered by user context. Admin sees all."""
+        filters: dict = {}
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                filters["user_id"] = None
+            else:
+                filters["__user_filter_mode"] = "owned_or_public"
+                filters["__user_id"] = user_ctx.user_id
+        return list(
+            await self.file_repo.list(filters=filters, offset=offset, limit=limit)
+        )
+
+    async def get_file(self, file_id: UUID, *, user_ctx: UserContext | None = None) -> File | None:
+        """Get a file by ID, checking ownership."""
+        file = await self.file_repo.get_by_id(file_id)
+        if file is None:
+            return None
+        if user_ctx is None or user_ctx.is_admin:
+            return file
+        ensure_owned_by(user_ctx, file.user_id, "file")
+        return file
+
     # ── Async (Queue-based) Import ─────────────────────────────────
 
-    async def import_text_stream_async(self, text: str, source_type: str = "paste") -> dict:
+    async def import_text_stream_async(self, text: str, source_type: str = "paste", *, user_ctx: UserContext | None = None) -> dict:
         """Submit text import to RabbitMQ queue instead of synchronous SSE.
 
         Returns a task_id that can be used to track progress.

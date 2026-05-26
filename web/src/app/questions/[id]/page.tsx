@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import axios from "axios";
+import api from "@/lib/api";
 import { useTaskEvents } from "@/hooks/useTaskEvents";
 
 interface TagInfo {
@@ -177,13 +177,12 @@ export default function QuestionDetailPage() {
   // 流式生成状态
   const [streamingTaskId, setStreamingTaskId] = useState<string | null>(null);
   const [streamingDepth, setStreamingDepth] = useState<string | null>(null);
-  const [streamingError, setStreamingError] = useState<string | null>(null);
   const [streamingComplete, setStreamingComplete] = useState(false);
 
   useEffect(() => {
     async function fetch() {
       try {
-        const res = await axios.get(`/api/v1/questions/${id}/detail`);
+        const res = await api.get(`/api/v1/questions/${id}/detail`);
         setDetail(res.data);
       } catch {
         setError("获取题目详情失败");
@@ -194,67 +193,48 @@ export default function QuestionDetailPage() {
     fetch();
   }, [id]);
 
-  const handleGenerate = async (depth: "brief" | "standard" | "deep") => {
-    setGenerating(true);
-    setGenerateError(null);
-    setGenerateDepth(depth);
-    try {
-      const res = await axios.post(`/api/v1/ai/explain`, {
-        question_id: id,
-        depth,
-      });
-      const data = res.data;
-      // Show answer_detail if present, otherwise explanation, otherwise short answer
-      const content = data.answer_detail || data.explanation || data.answer_short || JSON.stringify(data);
-      setGeneratedExplanation(content);
-      // If the server returned answer_detail, also store it in detail so it shows persistently
-      if (data.answer_detail) {
-        setDetail((prev) => prev ? { ...prev, answer_detail: data.answer_detail } : prev);
-      }
-    } catch {
-      setGenerateError("生成讲解失败，请检查网络连接或后端服务状态");
-    } finally {
-      setGenerating(false);
-    }
-  };
-
   // useTaskEvents hook for streaming — auto-connects when streamingTaskId is set
   const {
     accumulatedContent,
     currentPhase: streamPhase,
     progress: streamProgress,
-    status: streamStatus,
     isConnected: streamConnected,
     reset: resetStream,
   } = useTaskEvents(streamingTaskId, {
-    onDone: () => {
+    onDone: (finalState) => {
       setStreamingComplete(true);
-      if (accumulatedContent) {
-        setGeneratedExplanation(accumulatedContent);
+      const finalContent = finalState.content || accumulatedContent;
+      if (finalContent) {
+        setGeneratedExplanation(finalContent);
       }
     },
   });
 
-  const handleGenerateStream = async (depth: "brief" | "standard" | "deep") => {
+  const handleGenerate = async (depth: "brief" | "standard" | "deep") => {
+    // Use streaming endpoint — the page already supports streaming via useTaskEvents
     resetStream();
     setStreamingTaskId(null);
-    setStreamingError(null);
+    setGenerateError(null);
     setStreamingComplete(false);
     setStreamingDepth(depth);
+    setGenerateDepth(depth);
     setGeneratedExplanation(null);
+    setGenerating(true);
     try {
-      const res = await axios.post(`/api/v1/ai/explain-stream`, {
+      const res = await api.post(`/api/v1/ai/explain-stream`, {
         question_id: id,
         depth,
       });
       const taskId = res.data.task_id;
       if (!taskId) {
-        setStreamingError("未获取到任务ID，流式生成启动失败");
+        setGenerateError("未获取到任务ID，流式生成启动失败");
         return;
       }
       setStreamingTaskId(taskId);
     } catch {
-      setStreamingError("启动流式生成失败，请检查网络连接或后端服务状态");
+      setGenerateError("启动流式生成失败，请检查网络连接或后端服务状态");
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -430,28 +410,6 @@ export default function QuestionDetailPage() {
       {/* Generate explanation button group */}
       <section className="soft-card p-6 mb-6">
         <h2 className="section-title mb-4">AI 讲解</h2>
-        <p className="text-sm text-slate-500 mb-3">同步生成</p>
-        <div className="flex flex-wrap gap-3 mb-4">
-          {([
-            { value: "brief", label: "简要" },
-            { value: "standard", label: "标准" },
-            { value: "deep", label: "深入" },
-          ] as const).map(({ value, label }) => {
-            const isActive = generateDepth === value && generating;
-            const isSelected = generateDepth === value;
-            return (
-              <button
-                key={value}
-                onClick={() => handleGenerate(value)}
-                disabled={generating}
-                className={isActive || isSelected ? "btn-primary" : "btn-secondary"}
-              >
-                {isActive ? "生成中..." : label}
-              </button>
-            );
-          })}
-        </div>
-
         <p className="text-sm text-slate-500 mb-3">流式生成（实时输出）</p>
         <div className="flex flex-wrap gap-3 mb-4">
           {([
@@ -463,12 +421,12 @@ export default function QuestionDetailPage() {
             const isDone = streamingDepth === value && streamingComplete;
             return (
               <button
-                key={`stream-${value}`}
-                onClick={() => handleGenerateStream(value)}
-                disabled={isStreaming}
+                key={value}
+                onClick={() => handleGenerate(value)}
+                disabled={isStreaming || generating}
                 className={isStreaming || isDone ? "btn-primary" : "btn-secondary"}
               >
-                {isStreaming ? "流式中..." : isDone ? "已完成" : label}
+                {isStreaming ? "流式中..." : isDone ? "已完成" : generating ? "启动中..." : label}
               </button>
             );
           })}
@@ -477,11 +435,6 @@ export default function QuestionDetailPage() {
         {generateError && (
           <div className="error-banner">
             {generateError}
-          </div>
-        )}
-        {streamingError && (
-          <div className="error-banner">
-            {streamingError}
           </div>
         )}
 

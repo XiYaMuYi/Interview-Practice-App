@@ -1,21 +1,15 @@
-"""AI routes — explain, interview, evaluate."""
+"""AI routes — explain, interview, evaluate (streaming)."""
 
 from typing import AsyncGenerator
 import asyncio
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, get_user_context, UserContext
 from app.domain.schemas import (
-    AIExplanationRequest,
-    AIExplanationResponse,
-    EvaluationRequest,
-    EvaluationResponse,
-    InterviewAnswerRequest,
-    InterviewAnswerResponse,
     InterviewStartRequest,
     InterviewStartResponse,
 )
@@ -23,31 +17,9 @@ from app.services.ai_service import AIService
 
 router = APIRouter()
 
-# Simple in-memory store for interview sessions (MVP — replace with DB later)
-_interview_sessions: dict[str, dict] = {}
-
-
-@router.post("/explain", response_model=AIExplanationResponse)
-async def explain_question(session: DbSession, data: AIExplanationRequest):
-    """Get an AI explanation for a question."""
-    service = AIService(session)
-    result = await service.explain_question(
-        question_id=data.question_id,
-        question_text=data.question_text,
-        depth=data.depth,
-    )
-    return AIExplanationResponse(
-        answer_short=result.get("answer_short") or "",
-        answer_detail=result.get("answer_detail") or "",
-        explanation=result.get("explanation") or "",
-        knowledge_points=[],
-        common_pitfalls=None,
-        related_questions=[],
-    )
-
 
 @router.post("/interview/start", response_model=InterviewStartResponse)
-async def start_interview(session: DbSession, data: InterviewStartRequest):
+async def start_interview(session: DbSession, data: InterviewStartRequest, user_ctx: UserContext = Depends(get_user_context)):
     """Start an interview simulation."""
     service = AIService(session)
     result = await service.start_interview(
@@ -56,78 +28,11 @@ async def start_interview(session: DbSession, data: InterviewStartRequest):
         max_turns=data.max_turns,
     )
 
-    # Store session state
-    _interview_sessions[result["session_id"]] = {
-        "current_turn": 0,
-        "max_turns": data.max_turns,
-        "question_id": str(data.question_id) if data.question_id else None,
-        "last_question": result["first_question"],
-    }
-
     return InterviewStartResponse(
         session_id=result["session_id"],
         first_question=result["first_question"],
         max_turns=result["max_turns"],
     )
-
-
-@router.post("/interview/answer", response_model=InterviewAnswerResponse)
-async def submit_interview_answer(session: DbSession, data: InterviewAnswerRequest):
-    """Submit an answer during an interview."""
-    service = AIService(session)
-    session_data = _interview_sessions.get(data.session_id)
-    if not session_data:
-        return {"followup_question": None, "score": None, "feedback": "Session not found", "is_done": True}
-
-    session_data["current_turn"] += 1
-    current_turn = session_data["current_turn"]
-
-    result = await service.handle_interview_turn(
-        session_id=data.session_id,
-        current_turn=current_turn,
-        max_turns=session_data["max_turns"],
-        question_text=session_data["last_question"],
-        user_answer=data.answer,
-    )
-
-    # Update session state with the new question
-    if not result["is_done"] and result["followup_question"]:
-        session_data["last_question"] = result["followup_question"]
-
-    return InterviewAnswerResponse(
-        followup_question=result.get("followup_question"),
-        score=result.get("score"),
-        feedback=result.get("feedback"),
-        is_done=result["is_done"],
-        turns_remaining=result.get("turns_remaining"),
-        convergence_reason=result.get("convergence_reason"),
-        is_timeout=result.get("is_timeout"),
-    )
-
-
-@router.post("/evaluate", response_model=EvaluationResponse)
-async def evaluate_answer(session: DbSession, data: EvaluationRequest):
-    """Evaluate a user's answer to a question."""
-    service = AIService(session)
-    result = await service.evaluate_answer(
-        question_id=data.question_id,
-        user_answer=data.user_answer,
-    )
-    return EvaluationResponse(
-        score=result["score"],
-        feedback=result["feedback"],
-        missing_points=result.get("missing_points", []),
-        is_pass=result["is_pass"],
-        mastery_level=result.get("mastery_level", 1),
-    )
-
-
-@router.post("/followup")
-async def generate_followup(session: DbSession, question: str, answer: str):
-    """Generate follow-up questions based on a question and user answer."""
-    service = AIService(session)
-    followups = await service.generate_followup(question, answer)
-    return {"followup_questions": followups}
 
 
 class ExplainStreamRequest(BaseModel):
@@ -136,12 +41,28 @@ class ExplainStreamRequest(BaseModel):
     depth: str = "standard"
 
 
+class EvaluationStreamRequest(BaseModel):
+    question_id: UUID
+    user_answer: str
+
+
+class InterviewTurnStreamRequest(BaseModel):
+    session_id: str
+    current_turn: int = 1
+    max_turns: int = 5
+    question_text: str = ""
+    user_answer: str = ""
+
+
 @router.post("/explain-stream")
 async def explain_stream(
     body: ExplainStreamRequest,
     session: DbSession,
 ):
     """Start question explanation task. Returns task_id for SSE event consumption."""
+    if body.question_id is None and not body.question_text:
+        raise ValueError("Either question_id or question_text must be provided")
+
     service = AIService(session)
     task_id, event_gen = await service.explain_question_stream(
         question_id=body.question_id, question_text=body.question_text, depth=body.depth,
@@ -180,8 +101,7 @@ async def explain_stream(
 
 @router.post("/evaluate-stream")
 async def evaluate_stream(
-    question_id: UUID,
-    user_answer: str,
+    body: EvaluationStreamRequest,
 ):
     """Stream answer evaluation via SSE."""
     from app.infra.db.session import async_session
@@ -190,7 +110,7 @@ async def evaluate_stream(
         async with async_session() as session:
             service = AIService(session)
             task_id, event_gen = await service.evaluate_answer_stream(
-                question_id=question_id, user_answer=user_answer,
+                question_id=body.question_id, user_answer=body.user_answer,
             )
             try:
                 async for event in event_gen:
@@ -209,11 +129,7 @@ async def evaluate_stream(
 
 @router.post("/interview/turn-stream")
 async def interview_turn_stream(
-    session_id: str,
-    current_turn: int = 1,
-    max_turns: int = 5,
-    question_text: str = "",
-    user_answer: str = "",
+    body: InterviewTurnStreamRequest,
 ):
     """Stream interview turn processing via SSE."""
     from app.infra.db.session import async_session
@@ -222,8 +138,8 @@ async def interview_turn_stream(
         async with async_session() as session:
             service = AIService(session)
             task_id, event_gen = await service.handle_interview_turn_stream(
-                session_id=session_id, current_turn=current_turn, max_turns=max_turns,
-                question_text=question_text, user_answer=user_answer,
+                session_id=body.session_id, current_turn=body.current_turn, max_turns=body.max_turns,
+                question_text=body.question_text, user_answer=body.user_answer,
             )
             try:
                 async for event in event_gen:

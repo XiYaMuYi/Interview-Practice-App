@@ -44,7 +44,18 @@ class BaseRepository(Generic[ModelT]):
     ) -> Sequence[ModelT]:
         stmt = select(self.model).offset(offset).limit(limit)
         if filters:
+            user_filter_mode = filters.get("__user_filter_mode")
+            user_id = filters.get("__user_id")
+            if hasattr(self.model, "user_id"):
+                if user_filter_mode == "public_only":
+                    stmt = stmt.where(getattr(self.model, "user_id").is_(None))
+                elif user_filter_mode == "owned_or_public" and user_id is not None:
+                    from sqlalchemy import or_
+
+                    stmt = stmt.where(or_(getattr(self.model, "user_id") == user_id, getattr(self.model, "user_id").is_(None)))
             for key, value in filters.items():
+                if key.startswith("__user_"):
+                    continue
                 stmt = stmt.where(getattr(self.model, key) == value)
         result = await self.session.exec(stmt)
         rows = result.all()
@@ -71,7 +82,18 @@ class BaseRepository(Generic[ModelT]):
 
         stmt = select(func.count()).select_from(self.model)
         if filters:
+            user_filter_mode = filters.get("__user_filter_mode")
+            user_id = filters.get("__user_id")
+            if hasattr(self.model, "user_id"):
+                if user_filter_mode == "public_only":
+                    stmt = stmt.where(getattr(self.model, "user_id").is_(None))
+                elif user_filter_mode == "owned_or_public" and user_id is not None:
+                    from sqlalchemy import or_
+
+                    stmt = stmt.where(or_(getattr(self.model, "user_id") == user_id, getattr(self.model, "user_id").is_(None)))
             for key, value in filters.items():
+                if key.startswith("__user_"):
+                    continue
                 stmt = stmt.where(getattr(self.model, key) == value)
         result = await self.session.exec(stmt)
         return result.one()
@@ -129,6 +151,7 @@ class QuestionRepository(BaseRepository["Question"]):
     async def search(
         self,
         *,
+        user_id: str | None = None,
         query: str | None = None,
         domain_type: str | None = None,
         question_type: str | None = None,
@@ -140,6 +163,13 @@ class QuestionRepository(BaseRepository["Question"]):
         from sqlalchemy import or_
 
         stmt = select(self.model).where(self.model.deleted_at.is_(None))
+
+        # User isolation: own+public, public-only, or no filter
+        if user_id == "__public_only__":
+            stmt = stmt.where(self.model.user_id.is_(None))
+        elif user_id is not None:
+            stmt = stmt.where(or_(self.model.user_id == user_id, self.model.user_id.is_(None)))
+
         if query:
             stmt = stmt.where(
                 or_(
@@ -192,8 +222,14 @@ class QuestionRepository(BaseRepository["Question"]):
 
         # Build the base filter conditions
         conditions = [self.model.deleted_at.is_(None)]
-        if user_id is not None:
-            conditions.append(self.model.user_id == user_id)
+
+        # User isolation: own+public, public-only, or no filter
+        if user_id == "__public_only__":
+            conditions.append(self.model.user_id.is_(None))
+        elif user_id is not None:
+            conditions.append(or_(self.model.user_id == user_id, self.model.user_id.is_(None)))
+        # user_id=None → no filter (admin / backward compat)
+
         if query:
             conditions.append(
                 or_(
@@ -274,7 +310,20 @@ class StudyRecordRepository(BaseRepository["StudyRecord"]):
         data_stmt = select(self.model)
 
         if filters:
+            user_filter_mode = filters.get("__user_filter_mode")
+            user_id = filters.get("__user_id")
+            if user_filter_mode == "public_only":
+                count_stmt = count_stmt.where(self.model.user_id.is_(None))
+                data_stmt = data_stmt.where(self.model.user_id.is_(None))
+            elif user_filter_mode == "owned_or_public" and user_id is not None:
+                from sqlalchemy import or_
+
+                owned_or_public = or_(self.model.user_id == user_id, self.model.user_id.is_(None))
+                count_stmt = count_stmt.where(owned_or_public)
+                data_stmt = data_stmt.where(owned_or_public)
             for key, value in filters.items():
+                if key.startswith("__user_"):
+                    continue
                 count_stmt = count_stmt.where(getattr(self.model, key) == value)
                 data_stmt = data_stmt.where(getattr(self.model, key) == value)
 

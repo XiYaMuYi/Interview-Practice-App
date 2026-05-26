@@ -12,16 +12,17 @@
  *   - DELETE /api/v1/resumes/{id}
  *   - GET    /api/v1/resumes/tasks/{taskId}
  */
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
 
 function buildUrl(request: NextRequest, params: { path: string[] }): { url: string; headers: Headers } {
   const path = params.path.join('/');
-  const url = `${BACKEND}/api/v1/resumes${path ? '/' + path : ''}`;
+  const url = `${BACKEND}/api/v1/resumes${path ? '/' + path : ''}${request.nextUrl.search}`;
 
   const headers = new Headers(request.headers);
   headers.delete('connection');
@@ -29,6 +30,12 @@ function buildUrl(request: NextRequest, params: { path: string[] }): { url: stri
   headers.delete('content-length');
 
   return { url, headers };
+}
+
+function responseHeadersWithProxyMarker(headers: Headers): Headers {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set('X-Resume-Proxy', 'app-route');
+  return responseHeaders;
 }
 
 // POST — SSE streaming passthrough (parse-stream, upload, etc.)
@@ -49,8 +56,41 @@ export async function POST(
   const responseHeaders = new Headers(response.headers);
   responseHeaders.set('Cache-Control', 'no-cache');
   responseHeaders.set('Connection', 'keep-alive');
+  responseHeaders.set('X-Accel-Buffering', 'no');
+  responseHeaders.set('X-Resume-Proxy', 'app-route');
   responseHeaders.delete('Content-Encoding');
   responseHeaders.delete('Content-Length');
+  responseHeaders.delete('Transfer-Encoding');
+
+  if (responseHeaders.get('content-type')?.includes('event-stream')) {
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = response.body?.getReader();
+        if (!reader) {
+          controller.close();
+          return;
+        }
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+        } catch (error) {
+          controller.error(error);
+        } finally {
+          controller.close();
+          reader.releaseLock();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      status: response.status,
+      headers: responseHeaders,
+    });
+  }
 
   return new Response(response.body, {
     status: response.status,
@@ -73,7 +113,7 @@ export async function GET(
 
   return new Response(response.body, {
     status: response.status,
-    headers: response.headers,
+    headers: responseHeadersWithProxyMarker(response.headers),
   });
 }
 
@@ -91,6 +131,6 @@ export async function DELETE(
 
   return new Response(response.body, {
     status: response.status,
-    headers: response.headers,
+    headers: responseHeadersWithProxyMarker(response.headers),
   });
 }

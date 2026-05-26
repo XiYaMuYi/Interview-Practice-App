@@ -271,7 +271,12 @@ class AIService:
                 await task_manager.publish_task_event(str(task_id), {"task_id": str(task_id), "content": response, "depth": depth})
                 yield _sse("content", {"task_id": str(task_id), "content": response, "depth": depth})
 
-                await task_manager.update_task(task_id, status="done", progress=1.0)
+                await task_manager.update_task(
+                    task_id,
+                    status="done",
+                    progress=1.0,
+                    extra_data={"content": response, "depth": depth},
+                )
                 await task_manager.publish_task_event(str(task_id), {"task_id": str(task_id), "status": "done", "elapsed": round(time.monotonic() - start_time, 1)})
                 yield _sse("done", {"task_id": str(task_id), "status": "done", "elapsed": round(time.monotonic() - start_time, 1)})
 

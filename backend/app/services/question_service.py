@@ -3,6 +3,7 @@
 import hashlib
 from uuid import UUID
 
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -10,6 +11,7 @@ from app.core.logging import get_logger
 from app.domain.enums import QuestionType
 from app.domain.models import KnowledgeNode, Question, QuestionKnowledgeNode, QuestionTag, Tag
 from app.infra.cache.cache_service import TTL_QUESTION, get_cache, set_cache
+from app.infra.data_isolation import UserContext, check_resource_ownership, ensure_owned_by
 from app.infra.llm.gateway import llm_gateway
 from app.infra.repositories import KnowledgeNodeRepository, QuestionRepository, TagRepository
 from app.infra.vectorstore.pgvector_store import PGVectorStore
@@ -43,7 +45,7 @@ class QuestionService:
 
     # ── CRUD ──────────────────────────────────────────────────────
 
-    async def create_question(self, data: dict) -> Question:
+    async def create_question(self, data: dict, *, user_ctx: UserContext | None = None) -> Question:
         """Create a new question, auto-computing content_hash.
 
         This is the canonical ingestion point for RAG/question records. Any
@@ -74,6 +76,7 @@ class QuestionService:
             return existing[0]
 
         question = Question(
+            user_id=user_ctx.user_id if (user_ctx and not user_ctx.is_admin) else None,
             title=data.get("title", content[:80])[:500],
             content=content,
             content_hash=content_hash,
@@ -89,19 +92,25 @@ class QuestionService:
         )
         return await self.question_repo.create(question)
 
-    async def get_question(self, question_id: UUID) -> Question:
+    async def get_question(self, question_id: UUID, *, user_ctx: UserContext | None = None) -> Question:
         question = await self.question_repo.get_by_id(question_id)
         if question is None or question.deleted_at is not None:
             raise NotFoundError("Question", str(question_id))
+        if user_ctx:
+            if not check_resource_ownership(user_ctx, question.user_id, "question"):
+                raise HTTPException(status_code=403, detail="无权访问此题目")
         return question
 
-    async def get_question_with_relations(self, question_id: UUID) -> Question:
+    async def get_question_with_relations(self, question_id: UUID, *, user_ctx: UserContext | None = None) -> Question:
         """Get a question with tags and knowledge_nodes eagerly loaded."""
         from sqlalchemy.orm import selectinload
 
         question = await self.question_repo.get_by_id(question_id)
         if question is None or question.deleted_at is not None:
             raise NotFoundError("Question", str(question_id))
+        if user_ctx:
+            if not check_resource_ownership(user_ctx, question.user_id, "question"):
+                raise HTTPException(status_code=403, detail="无权访问此题目")
 
         # Eagerly load relationships
         await self.session.refresh(question, attribute_names=["tags", "knowledge_nodes"])
@@ -121,6 +130,7 @@ class QuestionService:
     async def list_questions(
         self,
         *,
+        user_ctx: UserContext | None = None,
         query: str | None = None,
         domain_type: str | None = None,
         question_type: str | None = None,
@@ -129,8 +139,18 @@ class QuestionService:
         offset: int = 0,
         limit: int = 50,
     ) -> list[Question]:
+        # Admin sees all questions; non-admin sees own+public or public-only
+        if user_ctx and user_ctx.is_admin:
+            user_id_for_filter: str | None = None
+        elif user_ctx and user_ctx.is_anonymous:
+            user_id_for_filter = "__public_only__"
+        elif user_ctx:
+            user_id_for_filter = user_ctx.user_id
+        else:
+            user_id_for_filter = None
         return list(
             await self.question_repo.search(
+                user_id=user_id_for_filter,
                 query=query,
                 domain_type=domain_type,
                 question_type=question_type,
@@ -144,7 +164,7 @@ class QuestionService:
     async def list_questions_with_count(
         self,
         *,
-        user_id: str | None = None,
+        user_ctx: UserContext | None = None,
         query: str | None = None,
         domain_type: str | None = None,
         question_type: str | None = None,
@@ -155,9 +175,18 @@ class QuestionService:
         page_size: int = 20,
     ) -> tuple[list[Question], int]:
         """Return (items, total_count) using a real COUNT query."""
+        # Admin sees all questions; non-admin sees own+public or public-only
+        if user_ctx and user_ctx.is_admin:
+            user_id_for_filter: str | None = None
+        elif user_ctx and user_ctx.is_anonymous:
+            user_id_for_filter = "__public_only__"
+        elif user_ctx:
+            user_id_for_filter = user_ctx.user_id
+        else:
+            user_id_for_filter = None
         offset = (page - 1) * page_size
         items, total = await self.question_repo.search_with_count(
-            user_id=user_id,
+            user_id=user_id_for_filter,
             query=query,
             domain_type=domain_type,
             question_type=question_type,
@@ -169,24 +198,102 @@ class QuestionService:
         )
         return list(items), total
 
-    async def update_question(self, question_id: UUID, updates: dict) -> Question:
+    async def get_random_question(
+        self,
+        *,
+        user_ctx: UserContext | None = None,
+        query: str | None = None,
+        domain_type: str | None = None,
+        question_type: str | None = None,
+        difficulty_level: int | None = None,
+        source_type: str | None = None,
+        source_ref: str | None = None,
+        exclude_id: UUID | None = None,
+    ) -> Question | None:
+        """Return one random question matching the same filters as the list API."""
+        from sqlalchemy import func, or_, select
+
+        # Admin sees all; non-admin sees own+public or public-only
+        if user_ctx and user_ctx.is_admin:
+            user_id_filter: str | None = None
+        elif user_ctx and user_ctx.is_anonymous:
+            user_id_filter = "__public_only__"
+        elif user_ctx:
+            user_id_filter = user_ctx.user_id
+        else:
+            user_id_filter = None
+
+        stmt = select(Question).where(Question.deleted_at.is_(None))
+        # User isolation: own+public, public-only, or no filter
+        if user_id_filter == "__public_only__":
+            stmt = stmt.where(Question.user_id.is_(None))
+        elif user_id_filter is not None:
+            stmt = stmt.where(or_(Question.user_id == user_id_filter, Question.user_id.is_(None)))
+        if query:
+            stmt = stmt.where(
+                or_(
+                    Question.title.ilike(f"%{query}%"),
+                    Question.content.ilike(f"%{query}%"),
+                )
+            )
+        if domain_type:
+            stmt = stmt.where(Question.domain_type == domain_type)
+        if question_type:
+            stmt = stmt.where(Question.question_type == question_type)
+        if difficulty_level is not None:
+            stmt = stmt.where(Question.difficulty_level == difficulty_level)
+        if source_type:
+            stmt = stmt.where(Question.source_type == source_type)
+        if source_ref:
+            stmt = stmt.where(Question.source_ref == source_ref)
+        if exclude_id is not None:
+            stmt = stmt.where(Question.id != exclude_id)
+
+        result = await self.session.exec(stmt.order_by(func.random()).limit(1))
+        row = result.first()
+        if row is None:
+            return None
+        if isinstance(row, Question):
+            return row
+        if hasattr(row, "_mapping"):
+            for value in row._mapping.values():
+                if isinstance(value, Question):
+                    return value
+        if isinstance(row, tuple) and row and isinstance(row[0], Question):
+            return row[0]
+        logger.warning("Unexpected random question row shape: %s", type(row))
+        return None
+
+    async def update_question(
+        self, question_id: UUID, updates: dict, *, user_ctx: UserContext | None = None,
+    ) -> Question:
         question = await self.question_repo.get_by_id(question_id)
         if question is None:
             raise NotFoundError("Question", str(question_id))
+        if user_ctx:
+            if not check_resource_ownership(user_ctx, question.user_id, "question"):
+                raise HTTPException(status_code=403, detail="无权修改此题目")
 
-        # Don't allow updating content_hash directly
         updates.pop("content_hash", None)
         updated = await self.question_repo.update(question_id, updates)
         if updated is None:
             raise NotFoundError("Question", str(question_id))
         return updated
 
-    async def delete_question(self, question_id: UUID) -> bool:
+    async def delete_question(
+        self, question_id: UUID, *, user_ctx: UserContext | None = None,
+    ) -> bool:
+        question = await self.question_repo.get_by_id(question_id)
+        if question is None:
+            return False
+        if user_ctx:
+            if not check_resource_ownership(user_ctx, question.user_id, "question"):
+                raise HTTPException(status_code=403, detail="无权删除此题目")
         return await self.question_repo.soft_delete(question_id)
 
     # ── Classification ────────────────────────────────────────────
 
-    async def classify_question(self, question_id: UUID) -> dict:
+    async def classify_question(self, question_id: UUID, *, user_ctx: UserContext | None = None) -> dict:
         """Re-classify an existing question via LLM.
 
         This is the point where the system enriches a plain question with
@@ -285,7 +392,7 @@ class QuestionService:
 
     # ── Vector search ─────────────────────────────────────────────
 
-    async def semantic_search(self, query: str, *, top_k: int = 10) -> list[dict]:
+    async def semantic_search(self, query: str, *, top_k: int = 10, user_ctx: UserContext | None = None) -> list[dict]:
         """Search questions by semantic similarity using embeddings.
 
         This is the RAG retrieval entrypoint for question discovery. It uses
@@ -314,7 +421,7 @@ class QuestionService:
             limit=limit,
         )
 
-    async def embed_question(self, question_id: UUID) -> None:
+    async def embed_question(self, question_id: UUID, *, user_ctx: UserContext | None = None) -> None:
         """Generate and store an embedding for a question."""
         question = await self.get_question(question_id)
         text = f"{question.title}. {question.content[:500]}"

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import axios from "axios";
+import { useEffect, useState, useCallback, useRef } from "react";
+import api from "@/lib/api";
 import { EmptyState, LoadingState, ErrorState } from "@/components/states";
 import { Pagination } from "@/components/pagination";
 import SourceBadge from "@/components/SourceBadge";
 import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
 import { usePagination } from "@/hooks/usePagination";
+import { useTaskEvents } from "@/hooks/useTaskEvents";
+import AuthRouteGuard from "@/components/AuthRouteGuard";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -48,6 +50,16 @@ interface EvaluationResult {
   is_pass: boolean;
   mastery_level: number;
 }
+
+type StreamData = Partial<EvaluationResult> &
+  Partial<ExplainResult> & {
+    event_type?: string;
+    status?: string;
+    token?: string;
+    content?: string;
+    error?: string;
+    progress?: number;
+  };
 
 interface ExplainResult {
   answer_short: string;
@@ -132,7 +144,7 @@ function MarkdownContent({ text }: { text: string }) {
   );
 }
 
-const sourceTypes = ["resume", "file", "text", "manual", "ai"];
+const sourceTypes = ["upload", "resume", "paste", "text", "manual", "ai", "CUSTOM"];
 
 // ─── Practice Mode ───────────────────────────────────────────────────
 
@@ -207,41 +219,225 @@ function PracticeMode() {
   const [evalError, setEvalError] = useState<string | null>(null);
   const [explainError, setExplainError] = useState<string | null>(null);
 
+  // Streaming explanation state
+  const [streamingTaskId, setStreamingTaskId] = useState<string | null>(null);
+  const [streamingDepth, setStreamingDepth] = useState<Depth | null>(null);
+  const [streamingExplainError, setStreamingExplainError] = useState<string | null>(null);
+  const [streamingComplete, setStreamingComplete] = useState(false);
+  const [directStreamContent, setDirectStreamContent] = useState("");
+  const streamDoneRef = useRef(false);
+
+  const {
+    accumulatedContent: streamAccumulatedContent,
+    currentPhase: streamPhase,
+    progress: streamProgress,
+    isConnected: streamConnected,
+    reset: resetStream,
+  } = useTaskEvents(streamingTaskId, {
+    onDone: (finalState) => {
+      setStreamingComplete(true);
+      const finalContent = finalState.content || streamAccumulatedContent;
+      if (finalContent) {
+        setExplainResult({
+          answer_short: finalContent,
+          answer_detail: finalContent,
+          explanation: finalContent,
+          knowledge_points: [],
+          common_pitfalls: null,
+          related_questions: [],
+        });
+      }
+    },
+  });
+
   const resetToPage1 = () => pagination.resetPage();
 
-  const pickQuestion = useCallback(async (index: number) => {
-    if (index < 0 || index >= questions.length) return;
-    setLoadingDetail(true);
+  const resetPracticeAnswer = useCallback(() => {
     setSubmitted(false);
     setEvalResult(null);
     setExplainResult(null);
     setAnswer("");
     setEvalError(null);
     setExplainError(null);
-    setQuestionIndex(index);
-    try {
-      const q = questions[index];
-      const res = await axios.get(`/api/v1/questions/${q.id}/detail`);
-      setCurrentQ(res.data);
-    } catch {
-      setCurrentQ(null);
-    } finally {
-      setLoadingDetail(false);
+    setStreamingTaskId(null);
+    setStreamingExplainError(null);
+    setStreamingComplete(false);
+    setStreamingDepth(null);
+    setDirectStreamContent("");
+    resetStream();
+  }, [resetStream]);
+
+  const consumeSSEStream = useCallback(async (url: string, body: Record<string, unknown>) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok || !res.body) {
+      throw new Error(`Stream request failed: ${res.status}`);
     }
-  }, [questions]);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let eventType = "";
+    let finalData: StreamData | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          const data = JSON.parse(line.slice(5).trim()) as StreamData;
+          const type = String(data.event_type || eventType || "message");
+
+          if (type === "evaluation" || type === "result") {
+            setEvalResult((prev) => ({
+              score: data.score ?? prev?.score ?? 0,
+              feedback: data.feedback ?? prev?.feedback ?? "",
+              missing_points: data.missing_points ?? prev?.missing_points ?? [],
+              is_pass: data.is_pass ?? prev?.is_pass ?? false,
+              mastery_level: data.mastery_level ?? prev?.mastery_level ?? 1,
+            }));
+            finalData = data;
+          } else if (type === "progress") {
+            setEvalError(null);
+          } else if (data.content) {
+            setExplainResult({
+              answer_short: data.content || "",
+              answer_detail: data.content || "",
+              explanation: data.content || "",
+              knowledge_points: [],
+              common_pitfalls: null,
+              related_questions: [],
+            });
+          } else if (data.token) {
+            setExplainResult((prev) => {
+              const prevText = prev?.explanation || "";
+              const nextText = prevText + (data.token || "");
+              return {
+                answer_short: nextText,
+                answer_detail: nextText,
+                explanation: nextText,
+                knowledge_points: prev?.knowledge_points || [],
+                common_pitfalls: prev?.common_pitfalls || null,
+                related_questions: prev?.related_questions || [],
+              };
+            });
+          } else if (type === "done" || data.status === "done") {
+            finalData = finalData || data;
+            return finalData;
+          } else if (type === "error" || data.error) {
+            throw new Error(data.error || "Stream error");
+          }
+          eventType = "";
+        }
+      }
+    }
+
+    return finalData;
+  }, []);
+
+  const consumeTaskEventStream = useCallback(async (taskId: string) => {
+    const res = await fetch(`/api/v1/tasks/${taskId}/events`, {
+      headers: { Accept: "text/event-stream" },
+    });
+
+    if (!res.ok || !res.body) {
+      throw new Error(`Task event stream failed: ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let eventType = "";
+    let accumulated = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          const data = JSON.parse(line.slice(5).trim()) as StreamData;
+          const type = String(data.event_type || eventType || "message");
+
+          if (data.progress != null && data.status !== "done") setStreamingComplete(false);
+          if (type === "progress") {
+            setStreamingExplainError(null);
+          }
+
+          if (data.token) {
+            accumulated += String(data.token);
+            setExplainResult({
+              answer_short: accumulated,
+              answer_detail: accumulated,
+              explanation: accumulated,
+              knowledge_points: [],
+              common_pitfalls: null,
+              related_questions: [],
+            });
+            setDirectStreamContent(accumulated);
+          }
+
+          if (data.content) {
+            accumulated = String(data.content);
+            setExplainResult({
+              answer_short: accumulated,
+              answer_detail: accumulated,
+              explanation: accumulated,
+              knowledge_points: [],
+              common_pitfalls: null,
+              related_questions: [],
+            });
+            setDirectStreamContent(accumulated);
+          }
+
+          if (type === "done" || data.status === "done") {
+            setStreamingComplete(true);
+            return;
+          } else if (type === "error" || data.error) {
+            throw new Error(data.error || "Stream error");
+          }
+          eventType = "";
+        }
+      }
+    }
+  }, []);
 
   const handleSubmit = async () => {
     if (!currentQ || !answer.trim()) return;
     setEvaluating(true);
+    setEvalError(null);
     try {
-      const evalRes = await axios.post("/api/v1/ai/evaluate", {
+      const doneData = await consumeSSEStream("/api/v1/ai/evaluate-stream", {
         question_id: currentQ.id,
         user_answer: answer,
       });
-      const evalData: EvaluationResult = evalRes.data;
+      const evalData: EvaluationResult = {
+        score: doneData?.score ?? 0,
+        feedback: doneData?.feedback ?? "",
+        missing_points: doneData?.missing_points ?? [],
+        is_pass: doneData?.is_pass ?? false,
+        mastery_level: doneData?.mastery_level ?? 1,
+      };
       setEvalResult(evalData);
 
-      await axios.post("/api/v1/study/records", {
+      await api.post("/api/v1/study/records", {
         question_id: currentQ.id,
         study_type: "practice",
         user_answer: answer,
@@ -259,27 +455,65 @@ function PracticeMode() {
   };
 
   const handleExplain = async (depth: Depth) => {
+    await handleExplainStream(depth);
+  };
+
+  const handleExplainStream = async (depth: Depth) => {
     if (!currentQ) return;
     setExplaining(true);
-    setExplainError(null);
     setExplainDepth(depth);
+    setExplainError(null);
+    resetStream();
+    streamDoneRef.current = false;
+    setStreamingTaskId(null);
+    setStreamingExplainError(null);
+    setStreamingComplete(false);
+    setStreamingDepth(depth);
+    setDirectStreamContent("");
+    setExplainResult(null);
     try {
-      const res = await axios.post("/api/v1/ai/explain", {
+      const res = await api.post("/api/v1/ai/explain-stream", {
         question_id: currentQ.id,
         depth,
       });
-      setExplainResult(res.data);
+      const taskId = res.data.task_id;
+      if (!taskId) {
+        setStreamingExplainError("未获取到任务ID，流式生成启动失败");
+        return;
+      }
+      setStreamingTaskId(taskId);
+      await consumeTaskEventStream(taskId);
     } catch {
-      setExplainError("生成讲解失败");
+      setStreamingExplainError("启动流式生成失败，请检查网络连接或后端服务状态");
     } finally {
       setExplaining(false);
     }
   };
 
-  const handleNext = () => {
-    if (questions.length === 0) return;
-    const next = questionIndex < 0 ? 0 : (questionIndex + 1) % questions.length;
-    pickQuestion(next);
+  const handleRandomPick = async () => {
+    if (queryPagination.total === 0) return;
+
+    setLoadingDetail(true);
+    resetPracticeAnswer();
+    setQuestionIndex(-1);
+    setCurrentQ(null);
+
+    try {
+      const params = activeFilters();
+      if (currentQ?.id && queryPagination.total > 1) {
+        params.exclude_id = currentQ.id;
+      }
+
+      const randomRes = await api.get<QuestionListItem>("/api/v1/questions/random", { params });
+      const randomQuestion = randomRes.data;
+      const detailRes = await api.get(`/api/v1/questions/${randomQuestion.id}/detail`);
+      setCurrentQ(detailRes.data);
+      setQuestionIndex(questions.findIndex((q) => q.id === randomQuestion.id));
+    } catch {
+      setCurrentQ(null);
+    } finally {
+      setLoadingDetail(false);
+    }
   };
 
   const handleFilterChange = (setter: (v: string) => void, value: string) => {
@@ -341,9 +575,11 @@ function PracticeMode() {
             />
             <span className="text-sm text-slate-600">仅简历题</span>
           </label>
-          <button onClick={handleNext}
-            className="btn-primary">
-            {questionIndex < 0 ? "随机抽题" : "下一题"}
+          <button
+            onClick={handleRandomPick}
+            disabled={loadingDetail || queryPagination.total === 0}
+            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+            {loadingDetail ? "抽题中..." : "随机抽题"}
           </button>
         </div>
         <p className="text-sm text-slate-500">
@@ -440,21 +676,75 @@ function PracticeMode() {
                 <div className="mt-2 p-3 bg-slate-50/70 rounded-xl text-sm text-slate-700 whitespace-pre-wrap">{answer}</div>
               </details>
 
-              {/* Explain buttons */}
-              <div className="flex flex-wrap gap-3">
+              {/* Explain buttons - sync */}
+              <p className="text-sm text-slate-500 mb-2">同步生成</p>
+              <div className="flex flex-wrap gap-3 mb-4">
                 {(["brief", "standard", "deep"] as Depth[]).map((d) => {
                   const isActive = explainDepth === d;
                   const isLoading = isActive && explaining;
                   const hasResult = isActive && explainResult;
                   return (
-                    <button key={d} onClick={() => handleExplain(d)} disabled={explaining}
+                    <button key={d} onClick={() => handleExplain(d)} disabled={streamConnected && !streamingComplete}
                       className={hasResult ? "btn-primary" : isLoading ? "btn-primary opacity-50" : "btn-secondary"}>
                       {isLoading ? "生成中..." : d === "brief" ? "简要讲解" : d === "standard" ? "标准讲解" : "深入讲解"}
                     </button>
                   );
                 })}
               </div>
+
+              {/* Explain buttons - streaming */}
+              <p className="text-sm text-slate-500 mb-2">流式生成（实时输出）</p>
+              <div className="flex flex-wrap gap-3 mb-4">
+                {(["brief", "standard", "deep"] as Depth[]).map((d) => {
+                  const isStreaming = streamingDepth === d && streamConnected && !streamingComplete;
+                  const isDone = streamingDepth === d && streamingComplete;
+                  return (
+                    <button key={`stream-${d}`} onClick={() => handleExplainStream(d)}
+                      disabled={isStreaming}
+                      className={isStreaming || isDone ? "btn-primary" : "btn-secondary"}>
+                      {isStreaming ? "流式中..." : isDone ? "已完成" : d === "brief" ? "简要讲解" : d === "standard" ? "标准讲解" : "深入讲解"}
+                    </button>
+                  );
+                })}
+              </div>
+
               {explainError && <div className="mt-3 error-banner">{explainError}</div>}
+              {streamingExplainError && <div className="mt-3 error-banner">{streamingExplainError}</div>}
+
+              {/* Streaming output area */}
+              {streamingTaskId && (
+                <div className="mt-4 p-4 rounded-lg bg-slate-50 border border-slate-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-medium text-slate-700">
+                      实时输出
+                      {streamPhase && <span className="text-slate-400 ml-2">阶段: {streamPhase}</span>}
+                    </span>
+                    {!streamingComplete && streamConnected && (
+                      <span className="text-xs text-slate-400 animate-pulse">流式中...</span>
+                    )}
+                    {streamingComplete && (
+                      <span className="text-xs text-green-600">完成</span>
+                    )}
+                  </div>
+                  {/* Progress bar */}
+                  <div className="w-full bg-slate-200 rounded-full h-1.5 mb-3">
+                    <div
+                      className="bg-sky-500 h-1.5 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.max(0, Math.min(100, (streamProgress ?? 0) * 100))}%` }}
+                    />
+                  </div>
+                  {/* Accumulated content */}
+                  {(streamAccumulatedContent || directStreamContent) ? (
+                    <div className="whitespace-pre-wrap text-sm text-slate-800 max-h-96 overflow-y-auto p-3 bg-white rounded border border-slate-100">
+                      <MarkdownContent text={streamAccumulatedContent || directStreamContent} />
+                    </div>
+                  ) : (
+                    <div className="text-sm text-slate-400 text-center py-4">
+                      等待输出...
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -497,8 +787,11 @@ function PracticeMode() {
 
           {/* Next button */}
           <div className="flex justify-end">
-            <button onClick={handleNext} className="btn-primary">
-              下一题 &rarr;
+            <button
+              onClick={handleRandomPick}
+              className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={loadingDetail || queryPagination.total === 0}>
+              再随机一题 &rarr;
             </button>
           </div>
         </>
@@ -577,7 +870,7 @@ function ReviewMode() {
     setSubmitError(null);
     setSubmitSuccess(false);
     try {
-      const res = await axios.get(`/api/v1/questions/${questionId}/detail`);
+      const res = await api.get(`/api/v1/questions/${questionId}/detail`);
       setActiveQ(res.data);
     } catch {
       setActiveQ(null);
@@ -591,7 +884,7 @@ function ReviewMode() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await axios.post("/api/v1/study/review", {
+      await api.post("/api/v1/study/review", {
         question_id: activeQ.id,
         quality: qualityRating,
         user_answer: answer || null,
@@ -743,7 +1036,7 @@ function StatsMode() {
     setLoading(true);
     setError(null);
     try {
-      const res = await axios.get("/api/v1/study/stats");
+      const res = await api.get("/api/v1/study/stats");
       setStats(res.data);
     } catch {
       setError("获取学习统计失败");
@@ -838,28 +1131,30 @@ export default function StudyPage() {
   ];
 
   return (
-    <div className="page-frame-narrow">
-      <h1 className="page-title">学习练习</h1>
-      <p className="page-subtitle">通过练习和复习巩固知识，AI 评分帮助你针对性提升</p>
+    <AuthRouteGuard>
+      <div className="page-frame-narrow">
+        <h1 className="page-title">学习练习</h1>
+        <p className="page-subtitle">通过练习和复习巩固知识，AI 评分帮助你针对性提升</p>
 
-      {/* Tab bar */}
-      <div className="tab-bar mb-6">
-        {tabs.map(({ key, label }) => (
-          <button key={key} onClick={() => setActiveTab(key)}
-            className={`tab-pill ${
-              activeTab === key
-                ? "tab-pill-active"
-                : "tab-pill-inactive"
-            }`}>
-            {label}
-          </button>
-        ))}
+        {/* Tab bar */}
+        <div className="tab-bar mb-6">
+          {tabs.map(({ key, label }) => (
+            <button key={key} onClick={() => setActiveTab(key)}
+              className={`tab-pill ${
+                activeTab === key
+                  ? "tab-pill-active"
+                  : "tab-pill-inactive"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab content */}
+        {activeTab === "practice" && <PracticeMode />}
+        {activeTab === "review" && <ReviewMode />}
+        {activeTab === "stats" && <StatsMode />}
       </div>
-
-      {/* Tab content */}
-      {activeTab === "practice" && <PracticeMode />}
-      {activeTab === "review" && <ReviewMode />}
-      {activeTab === "stats" && <StatsMode />}
-    </div>
+    </AuthRouteGuard>
   );
 }

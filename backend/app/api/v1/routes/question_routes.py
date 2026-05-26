@@ -6,9 +6,9 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, get_user_context, UserContext
 from app.common.pagination import build_paginated_response
 from app.services.question_service import QuestionService
 
@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 @router.post("/import")
-async def import_questions(session: DbSession, data: dict):
+async def import_questions(session: DbSession, data: dict, user_ctx: UserContext = Depends(get_user_context)):
     """批量导入自定义题目。
 
     接收 questions: List[dict]，每条包含 content、category、difficulty、reference_answer，
@@ -53,7 +53,7 @@ async def import_questions(session: DbSession, data: dict):
                 "difficulty_level": item.difficulty,
                 "answer_summary": item.reference_answer,
             }
-            question = await service.create_question(question_data)
+            question = await service.create_question(question_data, user_ctx=user_ctx)
             results.append({
                 "index": idx,
                 "status": "success",
@@ -80,16 +80,21 @@ async def import_questions(session: DbSession, data: dict):
 
 
 @router.post("/extract")
-async def extract_questions(session: DbSession, text: str, source_type: str = Query("paste", max_length=50)):
+async def extract_questions(
+    session: DbSession,
+    text: str,
+    source_type: str = Query("paste", max_length=50),
+    user_ctx: UserContext = Depends(get_user_context),
+):
     """从原始文本中提取题目并保存。
 
-    这是导入链路中的“文本提取”入口，适用于粘贴题目、导入笔记、
+    这是导入链路中的"文本提取"入口，适用于粘贴题目、导入笔记、
     或把外部材料快速转成题库内容。
     """
     from app.services.import_service import ImportService
 
     service = ImportService(session)
-    result = await service.import_text(text, source_type=source_type)
+    result = await service.import_text(text, source_type=source_type, user_ctx=user_ctx)
     return result
 
 
@@ -97,7 +102,7 @@ async def extract_questions(session: DbSession, text: str, source_type: str = Qu
 @router.get("/")
 async def list_questions(
     session: DbSession,
-    user_id: str | None = Query(None, description="Filter by user_id"),
+    user_ctx: UserContext = Depends(get_user_context),
     query: str | None = Query(None, description="Full-text search in title/content"),
     domain_type: str | None = Query(None),
     question_type: str | None = Query(None),
@@ -114,7 +119,7 @@ async def list_questions(
     """
     service = QuestionService(session)
     questions, total = await service.list_questions_with_count(
-        user_id=user_id,
+        user_ctx=user_ctx,
         query=query,
         domain_type=domain_type,
         question_type=question_type,
@@ -145,6 +150,7 @@ async def list_questions(
 @router.get("/search")
 async def search_questions(
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
     q: str = Query(..., min_length=1, description="Search keyword"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -155,6 +161,7 @@ async def search_questions(
     """
     service = QuestionService(session)
     questions, total = await service.list_questions_with_count(
+        user_ctx=user_ctx,
         query=q,
         page=page,
         page_size=page_size,
@@ -177,14 +184,51 @@ async def search_questions(
     )
 
 
+@router.get("/random")
+async def random_question(
+    session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
+    query: str | None = Query(None, description="Full-text search in title/content"),
+    domain_type: str | None = Query(None),
+    question_type: str | None = Query(None),
+    difficulty_level: int | None = Query(None, ge=1, le=5),
+    source_type: str | None = Query(None, description="Filter by source"),
+    source_ref: str | None = Query(None, description="Filter by source_ref"),
+    exclude_id: UUID | None = Query(None, description="Question id to avoid returning"),
+):
+    """Return one random question matching the current filters."""
+    service = QuestionService(session)
+    question = await service.get_random_question(
+        user_ctx=user_ctx,
+        query=query,
+        domain_type=domain_type,
+        question_type=question_type,
+        difficulty_level=difficulty_level,
+        source_type=source_type,
+        source_ref=source_ref,
+        exclude_id=exclude_id,
+    )
+    if question is None:
+        raise HTTPException(status_code=404, detail="No matching questions")
+
+    return {
+        "id": str(question.id),
+        "title": question.title,
+        "question_type": question.question_type,
+        "domain_type": question.domain_type,
+        "difficulty_level": question.difficulty_level,
+        "source_type": question.source_type,
+    }
+
+
 @router.get("/{question_id}")
-async def get_question(session: DbSession, question_id: UUID):
+async def get_question(session: DbSession, question_id: UUID, user_ctx: UserContext = Depends(get_user_context)):
     """按 ID 获取单个题目的基础信息。
 
     这个接口通常用于题目详情页或面试页的快速加载。
     """
     service = QuestionService(session)
-    question = await service.get_question(question_id)
+    question = await service.get_question(question_id, user_ctx=user_ctx)
     return {
         "id": str(question.id),
         "title": question.title,
@@ -203,57 +247,57 @@ async def get_question(session: DbSession, question_id: UUID):
 
 @router.post("")
 @router.post("/")
-async def create_question(session: DbSession, data: dict):
+async def create_question(session: DbSession, data: dict, user_ctx: UserContext = Depends(get_user_context)):
     """手动创建题目。
 
     适用于后台录入、人工维护题库、或从外部系统导入后再补充字段。
     """
     service = QuestionService(session)
-    question = await service.create_question(data)
+    question = await service.create_question(data, user_ctx=user_ctx)
     return {"status": "created", "id": str(question.id)}
 
 
 @router.put("/{question_id}")
-async def update_question(session: DbSession, question_id: UUID, data: dict):
+async def update_question(session: DbSession, question_id: UUID, data: dict, user_ctx: UserContext = Depends(get_user_context)):
     """Update a question's fields."""
     service = QuestionService(session)
-    question = await service.update_question(question_id, data)
+    question = await service.update_question(question_id, data, user_ctx=user_ctx)
     return {"status": "updated", "id": str(question.id)}
 
 
 @router.delete("/{question_id}")
-async def delete_question(session: DbSession, question_id: UUID):
+async def delete_question(session: DbSession, question_id: UUID, user_ctx: UserContext = Depends(get_user_context)):
     """Soft-delete a question."""
     service = QuestionService(session)
-    deleted = await service.delete_question(question_id)
+    deleted = await service.delete_question(question_id, user_ctx=user_ctx)
     return {"status": "deleted" if deleted else "not_found"}
 
 
 @router.post("/{question_id}/classify")
-async def classify_question(session: DbSession, question_id: UUID):
+async def classify_question(session: DbSession, question_id: UUID, user_ctx: UserContext = Depends(get_user_context)):
     """Re-classify a question using the LLM."""
     service = QuestionService(session)
-    result = await service.classify_question(question_id)
+    result = await service.classify_question(question_id, user_ctx=user_ctx)
     return {"status": "classified", **result}
 
 
 @router.post("/{question_id}/embed")
-async def embed_question(session: DbSession, question_id: UUID):
+async def embed_question(session: DbSession, question_id: UUID, user_ctx: UserContext = Depends(get_user_context)):
     """Generate an embedding for a question."""
     service = QuestionService(session)
-    await service.embed_question(question_id)
+    await service.embed_question(question_id, user_ctx=user_ctx)
     return {"status": "embedded"}
 
 
 @router.get("/{question_id}/detail")
-async def get_question_detail(session: DbSession, question_id: UUID):
+async def get_question_detail(session: DbSession, question_id: UUID, user_ctx: UserContext = Depends(get_user_context)):
     """获取题目完整详情。
 
     这个接口会返回题目正文、来源、标签、知识节点、讲解、复习状态等，
     主要服务于详情页、练习页和面试页。
     """
     service = QuestionService(session)
-    question = await service.get_question_with_relations(question_id)
+    question = await service.get_question_with_relations(question_id, user_ctx=user_ctx)
 
     detail = {
         "id": str(question.id),
@@ -295,26 +339,26 @@ async def get_question_detail(session: DbSession, question_id: UUID):
 
 
 @router.post("/search/semantic")
-async def semantic_search(session: DbSession, query: str, top_k: int = Query(10, ge=1, le=50)):
+async def semantic_search(session: DbSession, query: str, user_ctx: UserContext = Depends(get_user_context), top_k: int = Query(10, ge=1, le=50)):
     """按语义相似度搜索题目。
 
-    这是 RAG 检索的面向业务入口，适合做“相关题推荐”“相似题召回”。
+    这是 RAG 检索的面向业务入口，适合做"相关题推荐""相似题召回"。
     """
     from app.services.question_service import QuestionService
 
     service = QuestionService(session)
-    results = await service.semantic_search(query, top_k=top_k)
+    results = await service.semantic_search(query, top_k=top_k, user_ctx=user_ctx)
     return {"items": results, "total": len(results)}
 
 
 @router.post("/auto-classify")
-async def auto_classify_new(session: DbSession, data: dict):
+async def auto_classify_new(session: DbSession, data: dict, user_ctx: UserContext = Depends(get_user_context)):
     """创建题目后自动分类并关联知识节点。
 
     这是一个便捷接口，适合导入链路或后台批处理使用。
     """
     service = QuestionService(session)
-    question = await service.create_question(data)
+    question = await service.create_question(data, user_ctx=user_ctx)
     classification = await service.classify_question(question.id)
     await service.auto_link_knowledge_nodes(question.id)
     return {

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.domain.models import ChatHistory, Question
+from app.infra.data_isolation import UserContext
 from app.infra.llm.gateway import llm_gateway, prompt_registry
 from app.infra.repositories import ChatHistoryRepository
 
@@ -24,13 +25,13 @@ class ChatService:
 
     # ── Session Management ──────────────────────────────────────────
 
-    async def create_session(self, *, user_id: str | None = None, mode: str = "chat") -> str:
+    async def create_session(self, *, user_ctx: UserContext | None = None, mode: str = "chat") -> str:
         """Create a new chat session and return the session ID."""
         session_id = f"{mode}_{uuid.uuid4().hex[:12]}"
         # Create a system message to mark session start
         system_msg = ChatHistory(
             session_id=session_id,
-            user_id=user_id,
+            user_id=user_ctx.user_id if (user_ctx and not user_ctx.is_admin) else None,
             role="system",
             message=f"Session started. Mode: {mode}",
             message_type="system",
@@ -39,7 +40,7 @@ class ChatService:
         logger.info(f"Chat session created: {session_id}, mode={mode}")
         return session_id
 
-    async def get_sessions(self, *, user_id: str | None = None, offset: int = 0, limit: int = 20) -> list[dict]:
+    async def get_sessions(self, *, user_ctx: UserContext | None = None, offset: int = 0, limit: int = 20) -> list[dict]:
         """List chat sessions with message counts."""
         stmt = (
             select(ChatHistory.session_id, ChatHistory.created_at)
@@ -48,6 +49,13 @@ class ChatService:
             .offset(offset)
             .limit(limit)
         )
+        # User isolation
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                stmt = stmt.where(ChatHistory.user_id.is_(None))
+            else:
+                from sqlalchemy import or_ as _or
+                stmt = stmt.where(_or(ChatHistory.user_id == user_ctx.user_id, ChatHistory.user_id.is_(None)))
         result = await self.session.exec(stmt)
         rows = result.all()
 
@@ -65,7 +73,7 @@ class ChatService:
         return sessions
 
     async def get_sessions_with_count(
-        self, *, page: int = 1, page_size: int = 20
+        self, *, user_ctx: UserContext | None = None, page: int = 1, page_size: int = 20
     ) -> tuple[list[dict], int]:
         """List chat sessions with real total count."""
         from sqlalchemy import func as sa_func
@@ -74,6 +82,13 @@ class ChatService:
 
         # Count distinct sessions
         count_stmt = select(sa_func.count(sa_func.distinct(ChatHistory.session_id)))
+        # User isolation
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                count_stmt = count_stmt.where(ChatHistory.user_id.is_(None))
+            else:
+                from sqlalchemy import or_ as _or
+                count_stmt = count_stmt.where(_or(ChatHistory.user_id == user_ctx.user_id, ChatHistory.user_id.is_(None)))
         total = (await self.session.exec(count_stmt)).scalar_one()
 
         # Data query
@@ -84,6 +99,13 @@ class ChatService:
             .offset(offset)
             .limit(page_size)
         )
+        # User isolation
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                stmt = stmt.where(ChatHistory.user_id.is_(None))
+            else:
+                from sqlalchemy import or_ as _or
+                stmt = stmt.where(_or(ChatHistory.user_id == user_ctx.user_id, ChatHistory.user_id.is_(None)))
         result = await self.session.exec(stmt)
         rows = result.all()
 
@@ -102,9 +124,17 @@ class ChatService:
 
     # ── Message History ─────────────────────────────────────────────
 
-    async def get_history(self, session_id: str) -> list[ChatHistory]:
+    async def get_history(self, session_id: str, *, user_ctx: UserContext | None = None) -> list[ChatHistory]:
         """Get full chat history for a session, ordered by time."""
-        return list(await self.chat_repo.get_by_session(session_id))
+        history = list(await self.chat_repo.get_by_session(session_id))
+        # Ownership check: verify session belongs to user
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                if history and history[0].user_id is not None:
+                    return []
+            elif history and history[0].user_id is not None and history[0].user_id != user_ctx.user_id:
+                return []
+        return history
 
     async def save_message(
         self,
@@ -114,12 +144,12 @@ class ChatService:
         *,
         message_type: str | None = None,
         related_question_id: UUID | None = None,
-        user_id: str | None = None,
+        user_ctx: UserContext | None = None,
     ) -> ChatHistory:
         """Persist a chat message."""
         record = ChatHistory(
             session_id=session_id,
-            user_id=user_id,
+            user_id=user_ctx.user_id if (user_ctx and not user_ctx.is_admin) else None,
             role=role,
             message=message,
             message_type=message_type,
@@ -136,17 +166,17 @@ class ChatService:
         *,
         mode: str = "chat",
         related_question_id: UUID | None = None,
-        user_id: str | None = None,
+        user_ctx: UserContext | None = None,
     ) -> str:
         """Send a user message, get LLM response, and persist both."""
         # Save user message
         await self.save_message(
             session_id, "user", user_message,
-            related_question_id=related_question_id, user_id=user_id,
+            related_question_id=related_question_id, user_ctx=user_ctx,
         )
 
         # Build messages from history
-        messages = await self._build_messages(session_id, user_message, mode=mode)
+        messages = await self._build_messages(session_id, user_message, mode=mode, user_ctx=user_ctx)
 
         # Load context question if applicable
         question_context = ""
@@ -169,7 +199,7 @@ class ChatService:
         response = await llm_gateway.chat(messages, temperature=0.7, max_tokens=2048)
 
         # Save assistant response
-        await self.save_message(session_id, "assistant", response, message_type=mode, user_id=user_id)
+        await self.save_message(session_id, "assistant", response, message_type=mode, user_ctx=user_ctx)
 
         return response
 
@@ -180,17 +210,17 @@ class ChatService:
         *,
         mode: str = "chat",
         related_question_id: UUID | None = None,
-        user_id: str | None = None,
+        user_ctx: UserContext | None = None,
     ) -> AsyncGenerator[str, None]:
         """Stream LLM response, save user message immediately and assistant at end."""
         # Save user message
         await self.save_message(
             session_id, "user", user_message,
-            related_question_id=related_question_id, user_id=user_id,
+            related_question_id=related_question_id, user_ctx=user_ctx,
         )
 
         # Build messages
-        messages = await self._build_messages(session_id, user_message, mode=mode)
+        messages = await self._build_messages(session_id, user_message, mode=mode, user_ctx=user_ctx)
 
         question_context = ""
         if related_question_id:
@@ -216,14 +246,20 @@ class ChatService:
         # Save complete assistant response
         await self.save_message(
             session_id, "assistant", "".join(full_response),
-            message_type=mode, user_id=user_id,
+            message_type=mode, user_ctx=user_ctx,
         )
 
     # ── Internal helpers ────────────────────────────────────────────
 
-    async def _build_messages(self, session_id: str, latest_message: str, *, mode: str = "chat") -> list[dict]:
+    async def _build_messages(self, session_id: str, latest_message: str, *, mode: str = "chat", user_ctx: UserContext | None = None) -> list[dict]:
         """Build message list from chat history, limited to last 20 messages."""
         history = await self.chat_repo.get_by_session(session_id)
+        # Ownership filter
+        if user_ctx and not user_ctx.is_admin:
+            if user_ctx.is_anonymous:
+                history = [h for h in history if h.user_id is None]
+            else:
+                history = [h for h in history if h.user_id is None or h.user_id == user_ctx.user_id]
         # Exclude system messages, limit to last 20
         msgs = [h for h in history if h.role != "system"][-20:]
         return [{"role": h.role, "content": h.message} for h in msgs]

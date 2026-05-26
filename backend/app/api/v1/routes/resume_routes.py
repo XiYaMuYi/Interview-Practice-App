@@ -5,10 +5,10 @@ from uuid import UUID
 
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, get_user_context, UserContext
 from app.common.pagination import build_paginated_response
 from app.core.exceptions import ParseError
 from app.domain.schemas.resume_schemas import (
@@ -27,7 +27,7 @@ router = APIRouter()
 async def upload_resume(
     session: DbSession,
     file: UploadFile = File(...),
-    user_id: str | None = Query(default=None),
+    user_ctx: UserContext = Depends(get_user_context),
 ):
     """Upload a resume file (PDF, DOCX, TXT, MD)."""
     content = await file.read()
@@ -37,6 +37,7 @@ async def upload_resume(
     # Problem 4: compute SHA256 hash for duplicate detection
     file_hash = hashlib.sha256(content).hexdigest()
 
+    user_id = user_ctx.user_id
     if user_id:
         service = ResumeService(session)
         existing = await service.find_by_user_and_hash(user_id, file_hash)
@@ -55,7 +56,7 @@ async def upload_resume(
     resume = await service.upload_resume(
         file_name=file.filename or "unknown",
         content=content,
-        user_id=user_id,
+        user_ctx=user_ctx,
     )
     # Store file_hash in extra_data for later duplicate detection
     resume.extra_data = {"file_hash": file_hash}
@@ -68,14 +69,14 @@ async def upload_resume_text(
     session: DbSession,
     text: str = Form(...),
     file_name: str = Form(default="pasted_resume.txt"),
-    user_id: str | None = Form(default=None),
+    user_ctx: UserContext = Depends(get_user_context),
 ):
     """Upload resume content as plain text."""
     if not text.strip():
         raise ParseError("Empty text provided")
 
     service = ResumeService(session)
-    resume = await service.upload_resume(file_name=file_name, content=text.encode("utf-8"), user_id=user_id)
+    resume = await service.upload_resume(file_name=file_name, content=text.encode("utf-8"), user_ctx=user_ctx)
     return resume
 
 
@@ -83,17 +84,18 @@ async def upload_resume_text(
 async def parse_resume(
     resume_id: UUID,
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
 ):
     """Parse an uploaded resume using LLM to extract structured data."""
     service = ResumeService(session)
-    result = await service.parse_resume(resume_id)
+    result = await service.parse_resume(resume_id, user_ctx=user_ctx)
     return result
 
 
 @router.get("")
 async def list_resumes(
     session: DbSession,
-    user_id: str | None = Query(default=None),
+    user_ctx: UserContext = Depends(get_user_context),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -102,7 +104,7 @@ async def list_resumes(
     resumes, total = await service.list_resumes_with_count(
         page=page,
         page_size=page_size,
-        user_id=user_id,
+        user_ctx=user_ctx,
     )
     return build_paginated_response(
         items=[
@@ -128,10 +130,11 @@ async def list_resumes(
 async def get_resume(
     resume_id: UUID,
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
 ):
     """Get a single resume by ID."""
     service = ResumeService(session)
-    resume = await service.get_resume(resume_id)
+    resume = await service.get_resume(resume_id, user_ctx=user_ctx)
     return resume
 
 
@@ -140,10 +143,11 @@ async def update_resume(
     resume_id: UUID,
     updates: ResumeUpdate,
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
 ):
     """Update a resume record."""
     service = ResumeService(session)
-    resume = await service.get_resume(resume_id)
+    resume = await service.get_resume(resume_id, user_ctx=user_ctx)
     update_data = updates.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(resume, key, value)
@@ -155,10 +159,11 @@ async def update_resume(
 async def delete_resume(
     resume_id: UUID,
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
 ):
     """Soft-delete a resume."""
     service = ResumeService(session)
-    deleted = await service.delete_resume(resume_id)
+    deleted = await service.delete_resume(resume_id, user_ctx=user_ctx)
     return {"status": "success", "deleted": deleted}
 
 
@@ -166,16 +171,20 @@ async def delete_resume(
 async def list_resume_experiences(
     resume_id: UUID,
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
 ):
     """List all parsed experiences for a resume."""
     from app.services.resume_service import ResumeService
     service = ResumeService(session)
+    # Check ownership before returning experiences
+    await service.get_resume(resume_id, user_ctx=user_ctx)
     return await service.list_experiences(resume_id)
 
 
 @router.post("/{resume_id}/parse-stream")
 async def parse_resume_stream(
     resume_id: UUID,
+    user_ctx: UserContext = Depends(get_user_context),
     generate_questions: bool = Query(
         default=False,
         description="If true, continue into question generation after parsing completes",
@@ -198,6 +207,7 @@ async def parse_resume_stream(
             service = ResumeService(session)
             task_id, event_gen = await service.parse_resume_stream(
                 resume_id,
+                user_ctx=user_ctx,
                 generate_questions=generate_questions,
                 max_questions=max_questions,
             )
@@ -224,6 +234,7 @@ async def parse_resume_stream(
 async def parse_resume_stream_async(
     resume_id: UUID,
     session: DbSession,
+    user_ctx: UserContext = Depends(get_user_context),
 ):
     """Submit resume parsing to RabbitMQ queue for async processing.
 
@@ -231,7 +242,7 @@ async def parse_resume_stream_async(
     Falls back to synchronous stream if RabbitMQ is unavailable.
     """
     service = ResumeService(session)
-    result = await service.parse_resume_stream_async(resume_id)
+    result = await service.parse_resume_stream_async(resume_id, user_ctx=user_ctx)
     return {"status": "success", **result}
 
 
@@ -248,6 +259,7 @@ async def get_task_status(task_id: UUID, session: DbSession):
 @router.post("/{resume_id}/regenerate-questions")
 async def regenerate_questions(
     resume_id: UUID,
+    user_ctx: UserContext = Depends(get_user_context),
     count: int = Query(default=10, ge=1, le=50, description="Number of questions to generate"),
 ):
     """Regenerate interview questions from resume experiences via SSE stream.
@@ -260,7 +272,7 @@ async def regenerate_questions(
     async def _stream() -> AsyncGenerator[str, None]:
         async with async_session() as db_session:
             service = ResumeService(db_session)
-            task_id, event_gen = await service.regenerate_questions_stream(resume_id, count=count)
+            task_id, event_gen = await service.regenerate_questions_stream(resume_id, user_ctx=user_ctx, count=count)
             try:
                 async for event in event_gen:
                     yield event
@@ -283,6 +295,7 @@ async def regenerate_questions(
 @router.post("/{resume_id}/generate-questions-stream")
 async def generate_questions_from_resume(
     resume_id: UUID,
+    user_ctx: UserContext = Depends(get_user_context),
     max_questions: int = Query(default=20, ge=1, le=50, description="Max questions to generate"),
 ):
     """Generate interview questions from a parsed resume via SSE stream.
@@ -299,7 +312,7 @@ async def generate_questions_from_resume(
         async with async_session() as db_session:
             service = ResumeService(db_session)
             task_id, event_gen = await service.generate_questions_from_resume_stream(
-                resume_id, max_questions=max_questions,
+                resume_id, user_ctx=user_ctx, max_questions=max_questions,
             )
             try:
                 async for event in event_gen:

@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
-import axios from "axios";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import api from "@/lib/api";
+import { authFetch } from "@/lib/auth";
 
 interface Question {
   id: string;
@@ -14,6 +13,8 @@ interface Question {
   domain_type: string | null;
   answered: boolean;
   score: number | null;
+  user_answer?: string | null;
+  feedback?: string | null;
 }
 
 interface ExamSession {
@@ -60,21 +61,19 @@ export default function ExamSessionPage() {
   const [grading, setGrading] = useState(false);
   const [gradingProgress, setGradingProgress] = useState({ graded: 0, total: 0 });
   const [gradingSummary, setGradingSummary] = useState("");
-  const [autoSaveTimer, setAutoSaveTimer] = useState<NodeJS.Timeout | null>(null);
-
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const gradingAbortRef = useRef<AbortController | null>(null);
 
   // Load exam
   useEffect(() => {
     const loadExam = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/api/v1/exams/sessions/${examId}`);
+        const res = await api.get(`/api/v1/exams/sessions/${examId}`);
         setExam(res.data);
 
         // Start exam if pending
         if (res.data.status === "pending") {
-          await axios.post(`${API_BASE}/api/v1/exams/sessions/${examId}/start`);
+          await api.post(`/api/v1/exams/sessions/${examId}/start`);
           setExam((prev) => prev ? { ...prev, status: "in_progress" } : null);
         }
 
@@ -102,7 +101,7 @@ export default function ExamSessionPage() {
         if (res.data.status === "graded") {
           setGrading(false);
         }
-      } catch (err: any) {
+      } catch {
         setError("加载考试失败");
       } finally {
         setLoading(false);
@@ -130,22 +129,25 @@ export default function ExamSessionPage() {
     return () => clearInterval(interval);
   }, [timeLeft, exam?.status]);
 
-  // Auto-save answers every 30 seconds
+  // Auto-save answers every 30 seconds (only while exam is in progress)
   useEffect(() => {
     if (!exam || exam.status !== "in_progress") return;
 
     const saveTimer = setInterval(async () => {
+      // Re-check status in case exam was submitted during the interval
+      if (exam.status !== "in_progress") return;
       const currentQ = exam.questions[currentQuestionIndex];
       if (!currentQ) return;
       const answer = answers[currentQ.id];
       if (answer && answer.trim()) {
         try {
-          await axios.post(`${API_BASE}/api/v1/exams/sessions/${examId}/answers`, {
+          await api.post(`/api/v1/exams/sessions/${examId}/answers`, {
             question_id: currentQ.id,
             user_answer: answer,
           });
         } catch (err) {
-          console.error("Auto-save failed:", err);
+          // Silently ignore auto-save failures — the submit handler will save all answers
+          console.warn("Auto-save skipped:", err);
         }
       }
     }, 30000);
@@ -172,11 +174,12 @@ export default function ExamSessionPage() {
 
   const handleSaveAnswer = async () => {
     if (!currentQuestion || !exam) return;
+    if (exam.status !== "in_progress" && exam.status !== "pending") return;
     const answer = answers[currentQuestion.id];
     if (!answer || !answer.trim()) return;
 
     try {
-      await axios.post(`${API_BASE}/api/v1/exams/sessions/${examId}/answers`, {
+      await api.post(`/api/v1/exams/sessions/${examId}/answers`, {
         question_id: currentQuestion.id,
         user_answer: answer,
       });
@@ -187,7 +190,7 @@ export default function ExamSessionPage() {
         updated[currentQuestionIndex] = { ...updated[currentQuestionIndex], answered: true };
         return { ...prev, questions: updated };
       });
-    } catch (err: any) {
+    } catch {
       setError("保存答案失败");
     }
   };
@@ -202,30 +205,108 @@ export default function ExamSessionPage() {
       await handleSaveAnswer();
 
       // Submit exam
-      await axios.post(`${API_BASE}/api/v1/exams/sessions/${examId}/submit`);
+      await api.post(`/api/v1/exams/sessions/${examId}/submit`);
+      setExam((prev) => prev ? { ...prev, status: "submitted" } : null);
 
       // Start grading with SSE
       setGrading(true);
       setGradingProgress({ graded: 0, total: exam.total_questions });
       setGradingSummary("");
 
-      const eventSource = new EventSource(`${API_BASE}/api/v1/exams/sessions/${examId}/grade`);
-      eventSourceRef.current = eventSource;
+      const controller = new AbortController();
+      gradingAbortRef.current = controller;
+      const eventSource = {
+        readyState: 0,
+        close() {
+          this.readyState = EventSource.CLOSED;
+          controller.abort();
+        },
+        addEventListener() {},
+        onmessage: null as ((event: MessageEvent) => void) | null,
+        onerror: null as (() => void) | null,
+      };
 
+      // Track if we've received any progress to detect silent failures
+      let hasReceivedProgress = false;
+      let lastEventTime = Date.now();
+      const overallTimeout = setTimeout(() => {
+        if (eventSource.readyState !== EventSource.CLOSED) {
+          eventSource.close();
+          setGrading(false);
+          setError("批改超时，请刷新页面查看结果");
+        }
+      }, 600000); // 10 minute overall timeout
+
+      // Per-event timeout: alert if no progress for 90 seconds (LLM might be slow)
+      const eventTimeout = setInterval(() => {
+        if (eventSource.readyState === EventSource.CLOSED) {
+          clearInterval(eventTimeout);
+          return;
+        }
+        const idle = Date.now() - lastEventTime;
+        if (idle > 90000 && hasReceivedProgress) {
+          // Still processing but taking a while — user gets feedback
+          setGradingSummary((prev) => prev + (prev ? "\n" : "") + "⏳ AI 正在思考中，请稍候...");
+        }
+      }, 30000);
+
+      const resetEventTimer = () => {
+        lastEventTime = Date.now();
+      };
+
+      // Handle named events (event: grading_progress, etc.)
+      const handleProgress = (event: MessageEvent) => {
+        hasReceivedProgress = true;
+        resetEventTimer();
+        const data = JSON.parse(event.data);
+        setGradingProgress({ graded: data.graded, total: data.total });
+        setGradingSummary(""); // Clear thinking message on real progress
+      };
+
+      const handleComplete = () => {
+        clearTimeout(overallTimeout);
+        clearInterval(eventTimeout);
+        eventSource.close();
+        setGrading(false);
+        api.get(`/api/v1/exams/sessions/${examId}`).then((res) => {
+          setExam(res.data);
+        });
+      };
+
+      const handleError = (event: MessageEvent) => {
+        clearTimeout(overallTimeout);
+        clearInterval(eventTimeout);
+        eventSource.close();
+        setGrading(false);
+        setError("批改失败: " + (JSON.parse(event.data).error || "未知错误"));
+      };
+
+      // Register named event listeners (for SSE events with `event:` line)
+      eventSource.addEventListener("grading_progress", handleProgress);
+      eventSource.addEventListener("grading_complete", handleComplete);
+      eventSource.addEventListener("error", handleError);
+
+      // Handle unnamed events (data-only, no `event:` line)
       eventSource.onmessage = (event) => {
+        hasReceivedProgress = true;
+        resetEventTimer();
         const data = JSON.parse(event.data);
         if (data.event === "grading_progress") {
           setGradingProgress({ graded: data.graded, total: data.total });
+          setGradingSummary(""); // Clear thinking message on real progress
         } else if (data.event === "token" && data.token) {
           setGradingSummary((prev) => prev + data.token);
         } else if (data.event === "grading_complete") {
+          clearTimeout(overallTimeout);
+          clearInterval(eventTimeout);
           eventSource.close();
           setGrading(false);
-          // Reload exam to show results
-          axios.get(`${API_BASE}/api/v1/exams/sessions/${examId}`).then((res) => {
+          api.get(`/api/v1/exams/sessions/${examId}`).then((res) => {
             setExam(res.data);
           });
         } else if (data.event === "error") {
+          clearTimeout(overallTimeout);
+          clearInterval(eventTimeout);
           eventSource.close();
           setGrading(false);
           setError("批改失败: " + data.error);
@@ -233,11 +314,58 @@ export default function ExamSessionPage() {
       };
 
       eventSource.onerror = () => {
-        eventSource.close();
-        setGrading(false);
-        setError("批改连接断开，请稍后刷新查看结果");
+        // Don't treat first error as fatal - EventSource fires onerror on connection open too
+        if (eventSource.readyState === EventSource.CLOSED) {
+          clearTimeout(overallTimeout);
+          clearInterval(eventTimeout);
+          // If we received progress before disconnect, grading likely completed
+          if (hasReceivedProgress) {
+            setGrading(false);
+            // Reload to check results
+            api.get(`/api/v1/exams/sessions/${examId}`).then((res) => {
+              setExam(res.data);
+            });
+          } else {
+            setGrading(false);
+            setError("批改连接断开，请稍后刷新查看结果");
+          }
+        }
       };
-    } catch (err: any) {
+
+      try {
+        const streamRes = await authFetch(`/api/v1/exams/sessions/${examId}/grade`, {
+          headers: { Accept: "text/event-stream" },
+          signal: controller.signal,
+        });
+        if (!streamRes.ok || !streamRes.body) {
+          throw new Error(`Grading stream failed: ${streamRes.status}`);
+        }
+
+        const reader = streamRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const blocks = buffer.split(/\r?\n\r?\n/);
+          buffer = blocks.pop() || "";
+
+          for (const block of blocks) {
+            const dataLines = block
+              .split(/\r?\n/)
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trim());
+            if (dataLines.length === 0) continue;
+            eventSource.onmessage?.({ data: dataLines.join("\n") } as MessageEvent);
+          }
+        }
+      } catch {
+        eventSource.close();
+        eventSource.onerror?.();
+      }
+    } catch {
       setError("提交考试失败");
     } finally {
       setIsSubmitting(false);
@@ -304,22 +432,29 @@ export default function ExamSessionPage() {
               {exam.questions.map((q, idx) => (
                 <div
                   key={q.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
+                  className="p-4 border rounded-lg hover:bg-gray-50"
                 >
-                  <div className="flex-1">
-                    <span className="text-sm font-medium text-gray-500 mr-3">#{idx + 1}</span>
-                    <span className="text-gray-800">{q.title}</span>
-                    {q.difficulty_level && (
-                      <span className={`ml-2 px-2 py-0.5 rounded text-xs ${difficultyColors[q.difficulty_level] || "bg-gray-100 text-gray-600"}`}>
-                        {difficultyLabels[q.difficulty_level] || "未知"}
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <span className="text-sm font-medium text-gray-500 mr-3">#{idx + 1}</span>
+                      <span className="text-gray-800">{q.title}</span>
+                      {q.difficulty_level && (
+                        <span className={`ml-2 px-2 py-0.5 rounded text-xs ${difficultyColors[q.difficulty_level] || "bg-gray-100 text-gray-600"}`}>
+                          {difficultyLabels[q.difficulty_level] || "未知"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-lg font-semibold ${q.score === null ? "text-gray-400" : q.score >= 60 ? "text-green-600" : "text-red-600"}`}>
+                        {q.score === null ? "未评分" : `${q.score}分`}
                       </span>
-                    )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-lg font-semibold ${q.score === null ? "text-gray-400" : q.score >= 60 ? "text-green-600" : "text-red-600"}`}>
-                      {q.score === null ? "未评分" : `${q.score}分`}
-                    </span>
-                  </div>
+                  {q.feedback && (
+                    <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm text-slate-700 whitespace-pre-wrap">
+                      {q.feedback}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

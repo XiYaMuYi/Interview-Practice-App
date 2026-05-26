@@ -17,3 +17,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    build: ./backend
+    container_name: interview_backend
+    restart: unless-stopped
+    entrypoint: ["/app/entrypoint.sh"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:dev_password@postgres:5432/interview_practice
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy

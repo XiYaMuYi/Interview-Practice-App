@@ -1,4 +1,4 @@
-"""API-level dependencies — auth, session wiring, etc."""
+"""API dependencies for auth, sessions, and user context."""
 
 import uuid
 
@@ -8,34 +8,34 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.domain.models.user import User
+from app.infra.data_isolation import UserContext
 from app.infra.db.session import DbSession
 
 
 ANONYMOUS_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 
+def _anonymous_user() -> User:
+    return User(
+        id=ANONYMOUS_USER_ID,
+        username="anonymous",
+        password_hash="",
+        is_active=True,
+        role="admin",
+        review_status="approved",
+    )
+
+
 async def get_current_user(
+    session: DbSession,
     authorization: str | None = Header(None),
-    session: DbSession = Depends(),
 ) -> User:
-    """FastAPI dependency that extracts and validates the current user from a Bearer token.
+    """Validate a bearer token and return the current user.
 
-    Usage::
-
-        @router.get("/protected")
-        async def protected_route(current_user: User = Depends(get_current_user)):
-            ...
-
-    When AUTH_ENABLED is False, returns a synthetic anonymous user so that
-    routes can still function without real credentials.
+    When auth is disabled, return a synthetic anonymous user.
     """
     if not settings.AUTH_ENABLED:
-        return User(
-            id=ANONYMOUS_USER_ID,
-            username="anonymous",
-            password_hash="",
-            is_active=True,
-        )
+        return _anonymous_user()
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
@@ -61,7 +61,38 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail=f"User '{subject}' not found")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User account is disabled")
+    if user.review_status != "approved":
+        raise HTTPException(status_code=403, detail="Account has not been approved yet")
     return user
 
 
-__all__ = ["DbSession", "get_current_user"]
+async def get_current_admin_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Ensure the current user has admin role."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin permission required")
+    return current_user
+
+
+async def get_user_context(
+    current_user: User | None = Depends(get_current_user),
+) -> UserContext:
+    """Return a strict user context for protected routes."""
+    if current_user is None or current_user.id == ANONYMOUS_USER_ID:
+        return UserContext(user_id=None, is_anonymous=True)
+    return UserContext(
+        user_id=str(current_user.id),
+        is_anonymous=False,
+        is_admin=current_user.role == "admin",
+    )
+
+
+__all__ = [
+    "ANONYMOUS_USER_ID",
+    "DbSession",
+    "UserContext",
+    "get_current_admin_user",
+    "get_current_user",
+    "get_user_context",
+]

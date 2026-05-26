@@ -33,7 +33,8 @@
 ### 第三组：最后读 Agent / Workflow
 1. `03_Agent_Workflows/04_LangGraph_Workflow.md`
 2. `03_Agent_Workflows/13_Backend_Agent_RAG_Code_Reading_Guide.md`
-3. `03_Agent_Workflows/阅读说明.md`
+3. `03_Agent_Workflows/18_Claude_Code_Auth_Migration_Prompt.md`
+4. `03_Agent_Workflows/阅读说明.md`
 
 ## 说明
 

@@ -27,21 +27,30 @@ export async function POST(
   { params }: { params: { path: string[] } }
 ) {
   const { url, headers } = buildUrl(request, params);
+  const body = await request.arrayBuffer();
 
   const response = await fetch(url, {
     method: 'POST',
     headers,
-    body: request.body,
-    duplex: 'half',
+    body,
     cache: 'no-store',
   });
 
   const responseHeaders = new Headers(response.headers);
   responseHeaders.set('Cache-Control', 'no-cache');
-  responseHeaders.set('Connection', 'keep-alive');
   responseHeaders.delete('Content-Encoding');
   responseHeaders.delete('Content-Length');
 
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/event-stream')) {
+    const responseBody = await response.arrayBuffer();
+    return new Response(responseBody, {
+      status: response.status,
+      headers: responseHeaders,
+    });
+  }
+
+  responseHeaders.set('Connection', 'keep-alive');
   return new Response(response.body, {
     status: response.status,
     headers: responseHeaders,

@@ -26,13 +26,13 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 180
 
     # --- Embedding ---
-    EMBEDDING_PROVIDER: str = "local"
-    EMBEDDING_MODEL_PATH: str = "D:/AI_Project/models/bge-small-zh-v1.5"
-    EMBEDDING_DIMENSION: int = 512
+    EMBEDDING_PROVIDER: str = "dashscope"
+    EMBEDDING_MODEL_PATH: str = "text-embedding-v4"
+    EMBEDDING_DIMENSION: int = 1024
 
-    # --- Reranker ---
-    RERANKER_PROVIDER: str = "local"
-    RERANKER_MODEL_PATH: str = "D:/AI_Project/models/bge-reranker-v2-m3"
+    # --- Reranker (预留，未实现) ---
+    # RERANKER_PROVIDER: str = "local"
+    # RERANKER_MODEL_PATH: str = ""
 
     # --- Auth ---
     AUTH_ENABLED: bool = False

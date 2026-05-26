@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
@@ -17,28 +18,36 @@ async def lifespan(app: FastAPI):
     setup_logging(debug=settings.DEBUG)
     logger.info("Starting Interview Practice App...")
 
-    # Initialize Redis cache
-    from app.infra.cache.redis_client import redis_client
-    await redis_client.connect()
+    # Initialize Redis cache (only if enabled)
+    if settings.REDIS_ENABLED:
+        from app.infra.cache.redis_client import redis_client
+        await redis_client.connect()
+        logger.info("Redis cache connected")
+    else:
+        logger.info("Redis cache disabled (skipping)")
 
-    # Initialize RabbitMQ
-    from app.infra.messaging.rabbit_client import rabbit_client
-    await rabbit_client.connect()
-
-    # Declare RabbitMQ queues
-    from app.infra.messaging.queue_service import declare_queues
-    await declare_queues()
-
-    # Initialize event publisher
-    from app.infra.events.event_publisher import event_publisher
-    await event_publisher.connect()
-
-    # Start RabbitMQ queue workers when enabled
+    # Initialize RabbitMQ (only if enabled)
     if settings.RABBITMQ_ENABLED:
+        from app.infra.messaging.rabbit_client import rabbit_client
+        await rabbit_client.connect()
+
+        from app.infra.messaging.queue_service import declare_queues
+        await declare_queues()
+
         from app.services.queue_worker_service import start_queue_workers
         import asyncio
         app.state.queue_worker_task = asyncio.create_task(start_queue_workers())
-        logger.info("RabbitMQ queue workers started")
+        logger.info("RabbitMQ connected, queues declared, workers started")
+    else:
+        logger.info("RabbitMQ disabled (skipping)")
+
+    # Initialize event publisher (in-memory fallback when Kafka disabled)
+    from app.infra.events.event_publisher import event_publisher
+    await event_publisher.connect()
+    if settings.EVENT_BACKEND == "inmemory":
+        logger.info("Event publisher initialized (in-memory backend)")
+    else:
+        logger.info(f"Event publisher initialized ({settings.EVENT_BACKEND} backend)")
 
     logger.info("All middleware connections initialized")
 
@@ -47,11 +56,13 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ─────────────────────────────────────────────────────
     logger.info("Shutting down middleware connections...")
 
-    from app.infra.cache.redis_client import redis_client
-    await redis_client.disconnect()
+    if settings.REDIS_ENABLED:
+        from app.infra.cache.redis_client import redis_client
+        await redis_client.disconnect()
 
-    from app.infra.messaging.rabbit_client import rabbit_client
-    await rabbit_client.disconnect()
+    if settings.RABBITMQ_ENABLED:
+        from app.infra.messaging.rabbit_client import rabbit_client
+        await rabbit_client.disconnect()
 
     from app.infra.events.event_publisher import event_publisher
     await event_publisher.disconnect()
@@ -73,6 +84,15 @@ def create_app() -> FastAPI:
         debug=settings.DEBUG,
         redirect_slashes=False,
         lifespan=lifespan,
+    )
+
+    # ── CORS ────────────────────────────────────────────────────────
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     # Health endpoints at root path (no version prefix)

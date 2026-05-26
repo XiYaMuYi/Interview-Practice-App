@@ -1,6 +1,6 @@
 """Auth routes — register, login, token refresh, user info."""
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import DbSession, get_current_user
 from app.domain.models.user import User
@@ -35,6 +35,16 @@ async def register(session: DbSession, data: RegisterRequest):
     )
     await session.commit()
 
+    # Check review status and return appropriate response
+    if user.review_status == "pending":
+        return RegisterResponse(
+            user_id=str(user.id),
+            username=user.username,
+            review_status="pending",
+            message="账号已创建，等待管理员审核",
+        )
+
+    # Approved path (e.g., AUTH_ENABLED=false or auto-approve)
     access_token = service.create_access_token(subject=user.username)
     refresh_token = service.create_refresh_token(subject=user.username)
 
@@ -58,7 +68,10 @@ async def login(session: DbSession, data: LoginRequest):
 
     service = AuthService(session)
     user = await service.authenticate(data.username, data.password)
-    access_token = service.create_access_token(subject=user.username)
+    await session.commit()  # Persist last_login_at update
+
+    extra_claims = {"role": user.role}
+    access_token = service.create_access_token(subject=user.username, extra_claims=extra_claims)
     refresh_token = service.create_refresh_token(subject=user.username)
 
     return LoginResponse(
@@ -109,7 +122,10 @@ async def get_me(
         "user_id": str(current_user.id),
         "username": current_user.username,
         "email": current_user.email,
+        "role": current_user.role,
+        "review_status": current_user.review_status,
         "is_active": current_user.is_active,
+        "last_login_at": current_user.last_login_at.isoformat() if current_user.last_login_at else None,
         "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
     }
 

@@ -44,6 +44,7 @@ class DashScopeProvider:
     def __init__(self) -> None:
         self.base_url = settings.LLM_BASE_URL.rstrip("/")
         self.api_key = settings.LLM_API_KEY
+        self.embedding_api_key = settings.EMBEDDING_API_KEY or settings.LLM_API_KEY
         self.model = settings.LLM_MODEL_NAME
         self.max_retries = settings.LLM_MAX_RETRIES
         self.timeout = settings.LLM_TIMEOUT
@@ -239,7 +240,7 @@ class DashScopeProvider:
         主要用于题目检索、知识检索、简历匹配等 RAG 场景。
         """
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self.embedding_api_key}",
             "Content-Type": "application/json",
         }
         payload = {

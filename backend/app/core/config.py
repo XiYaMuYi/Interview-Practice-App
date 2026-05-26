@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # --- Embedding ---
     EMBEDDING_PROVIDER: str = "dashscope"
+    EMBEDDING_API_KEY: str = ""  # 空则 fallback 到 LLM_API_KEY
     EMBEDDING_MODEL_PATH: str = "text-embedding-v4"
     EMBEDDING_DIMENSION: int = 1024
 

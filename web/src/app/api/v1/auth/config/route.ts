@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Server-side only (not exposed to browser)
+const BACKEND = process.env.BACKEND_URL ?? "http://localhost:8000";
 
 export async function GET() {
   try {

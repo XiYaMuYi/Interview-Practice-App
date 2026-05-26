@@ -4,9 +4,9 @@
  * falls back to JSON for regular API responses.
  *
  * NOTE: The following paths have dedicated proxy routes and do NOT fall through:
- *   - POST /api/v1/ai/explain-stream          â†’ explain-stream/route.ts
- *   - POST /api/v1/ai/evaluate-stream         â†’ evaluate-stream/route.ts
- *   - POST /api/v1/ai/interview/turn-stream   â†’ interview/turn-stream/route.ts
+ *   - POST /api/v1/ai/explain-stream          â†?explain-stream/route.ts
+ *   - POST /api/v1/ai/evaluate-stream         â†?evaluate-stream/route.ts
+ *   - POST /api/v1/ai/interview/turn-stream   â†?interview/turn-stream/route.ts
  *
  * This catch-all handles all remaining paths, e.g.:
  *   - POST /api/v1/ai/interview/start
@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 export const runtime = "nodejs";
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
 
 function stripForwardHeaders(headers: Headers): Headers {
   const h = new Headers();

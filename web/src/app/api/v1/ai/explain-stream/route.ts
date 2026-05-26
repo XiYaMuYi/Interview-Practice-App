@@ -1,5 +1,5 @@
 /**
- * Proxy for POST /api/v1/ai/explain-stream â†’ backend /api/v1/ai/explain-stream.
+ * Proxy for POST /api/v1/ai/explain-stream â†?backend /api/v1/ai/explain-stream.
  * Returns a task_id for SSE event consumption via /api/v1/tasks/{id}/events.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
 const BACKEND_TIMEOUT_MS = 30_000; // 30s timeout for initial task creation
 
 function stripForwardHeaders(headers: Headers): Headers {
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Backend returned a non-SSE response â€” should be JSON with task_id.
+    // Backend returned a non-SSE response â€?should be JSON with task_id.
     const text = await res.text();
     if (!res.ok) {
       console.error(`[explain-stream-proxy] Backend ${res.status} for ${url}: ${text.slice(0, 500)}`);
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     const isTimeout = err instanceof DOMException && err.name === "AbortError";
     const isConnectionRefused = msg.includes("ECONNREFUSED") || msg.includes("fetch failed");
     console.error(
-      `[explain-stream-proxy] POST ${url} failed: ${isTimeout ? "timeout" : "error"} â€” ${msg}`
+      `[explain-stream-proxy] POST ${url} failed: ${isTimeout ? "timeout" : "error"} â€?${msg}`
     );
     return NextResponse.json(
       {

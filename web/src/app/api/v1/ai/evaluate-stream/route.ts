@@ -1,5 +1,5 @@
 /**
- * Proxy for POST /api/v1/ai/evaluate-stream â†’ backend /api/v1/ai/evaluate-stream.
+ * Proxy for POST /api/v1/ai/evaluate-stream â†?backend /api/v1/ai/evaluate-stream.
  * Forwards SSE responses from the backend directly to the client.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
 
 function stripForwardHeaders(headers: Headers): Headers {
   const h = new Headers();

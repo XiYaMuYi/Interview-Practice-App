@@ -5,7 +5,7 @@
 import axios from "axios";
 import { getAccessToken, refreshAccessToken, clearAuth } from "@/lib/auth";
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || ""; // Use env var on Vercel, empty string for local rewrites
+const apiBaseUrl = ""; // Relative: browser → Vercel API route → BACKEND_URL (server-side, avoids mixed-content)
 
 const api = axios.create({
   baseURL: apiBaseUrl,

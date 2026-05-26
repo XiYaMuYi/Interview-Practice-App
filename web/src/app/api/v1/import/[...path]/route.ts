@@ -21,7 +21,7 @@ function buildUrl(request: NextRequest, params: { path: string[] }): { url: stri
   return { url, headers, method: request.method };
 }
 
-// POST â€” file upload, text import, streaming
+// POST â€?file upload, text import, streaming
 export async function POST(
   request: NextRequest,
   { params }: { params: { path: string[] } }
@@ -57,7 +57,7 @@ export async function POST(
   });
 }
 
-// GET â€” supported-formats, etc.
+// GET â€?supported-formats, etc.
 export async function GET(
   request: NextRequest,
   { params }: { params: { path: string[] } }

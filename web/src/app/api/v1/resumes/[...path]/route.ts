@@ -38,7 +38,7 @@ function responseHeadersWithProxyMarker(headers: Headers): Headers {
   return responseHeaders;
 }
 
-// POST â€” SSE streaming passthrough (parse-stream, upload, etc.)
+// POST â€?SSE streaming passthrough (parse-stream, upload, etc.)
 export async function POST(
   request: NextRequest,
   { params }: { params: { path: string[] } }
@@ -98,7 +98,7 @@ export async function POST(
   });
 }
 
-// GET â€” proxy list and detail requests
+// GET â€?proxy list and detail requests
 export async function GET(
   request: NextRequest,
   { params }: { params: { path: string[] } }
@@ -117,7 +117,7 @@ export async function GET(
   });
 }
 
-// DELETE â€” proxy delete requests
+// DELETE â€?proxy delete requests
 export async function DELETE(
   request: NextRequest,
   { params }: { params: { path: string[] } }

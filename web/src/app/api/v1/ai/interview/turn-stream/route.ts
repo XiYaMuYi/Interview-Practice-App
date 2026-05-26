@@ -1,5 +1,5 @@
 /**
- * Proxy for POST /api/v1/ai/interview/turn-stream â†’ backend /api/v1/ai/interview/turn-stream.
+ * Proxy for POST /api/v1/ai/interview/turn-stream â†?backend /api/v1/ai/interview/turn-stream.
  * Forwards SSE responses from the backend directly to the client.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
 const BACKEND_TIMEOUT_MS = 30_000; // 30s timeout for initial task creation
 
 function stripForwardHeaders(headers: Headers): Headers {
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     const isTimeout = err instanceof DOMException && err.name === "AbortError";
     const isConnectionRefused = msg.includes("ECONNREFUSED") || msg.includes("fetch failed");
     console.error(
-      `[turn-stream-proxy] POST ${url} failed: ${isTimeout ? "timeout" : "error"} â€” ${msg}`
+      `[turn-stream-proxy] POST ${url} failed: ${isTimeout ? "timeout" : "error"} â€?${msg}`
     );
     return NextResponse.json(
       {

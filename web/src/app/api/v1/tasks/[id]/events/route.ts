@@ -1,5 +1,5 @@
 /**
- * Proxy for GET /api/v1/tasks/[id]/events â†’ backend /api/v1/tasks/{id}/events.
+ * Proxy for GET /api/v1/tasks/[id]/events â†?backend /api/v1/tasks/{id}/events.
  * Streams SSE task progress events from the backend directly to the client.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
 
 export async function GET(
   req: NextRequest,

@@ -2,6 +2,8 @@
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+// Extend Vercel timeout to 30s (Pro plan) or fall back to default 10s
+export const maxDuration = 30;
 
 // Server-side backend URL (not exposed to browser)
 const BACKEND = process.env.BACKEND_URL || "http://localhost:8000";
@@ -26,36 +28,38 @@ export async function DELETE(req: NextRequest) {
   return proxy(req, "DELETE");
 }
 
-async function proxy(req: NextRequest, method: string) {
-  try {
-    // Reconstruct the backend URL from the catch-all path
-    const path = req.nextUrl.pathname.replace(/^\/api\/v1/, "/api/v1");
-    const search = req.nextUrl.search;
-    const url = `${BACKEND}${path}${search}`;
+async function proxy(req: NextRequest, method: string, attempt = 0): Promise<NextResponse> {
+  const maxRetries = 2;
+  const path = req.nextUrl.pathname.replace(/^\/api\/v1/, "/api/v1");
+  const search = req.nextUrl.search;
+  const url = `${BACKEND}${path}${search}`;
 
-    // Forward headers (except hop-by-hop headers)
-    const headers = new Headers();
-    req.headers.forEach((value, key) => {
-      const lower = key.toLowerCase();
-      if (!["host", "connection", "content-length"].includes(lower)) {
-        headers.set(key, value);
-      }
-    });
-
-    // Read body for methods that have one
-    let body: string | undefined;
-    if (["POST", "PUT", "PATCH"].includes(method)) {
-      body = await req.text();
-      if (!headers.has("content-type")) {
-        headers.set("content-type", "application/json");
-      }
+  // Forward headers (except hop-by-hop headers)
+  const headers = new Headers();
+  req.headers.forEach((value, key) => {
+    const lower = key.toLowerCase();
+    if (!["host", "connection", "content-length"].includes(lower)) {
+      headers.set(key, value);
     }
+  });
 
+  // Read body for methods that have one
+  let body: string | undefined;
+  if (["POST", "PUT", "PATCH"].includes(method)) {
+    body = await req.text();
+    if (!headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
+  }
+
+  try {
     const res = await fetch(url, {
       method,
       headers,
       body,
       cache: "no-store",
+      // Add explicit timeout to fail fast instead of hanging until Vercel kills us
+      signal: AbortSignal.timeout(25000),
     });
 
     // Forward the response
